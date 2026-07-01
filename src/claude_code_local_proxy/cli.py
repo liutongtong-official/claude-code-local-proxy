@@ -5,10 +5,16 @@ from __future__ import annotations
 import argparse
 import logging
 import os
+from collections.abc import Callable
 
 from dotenv import find_dotenv, load_dotenv
 
 from claude_code_local_proxy.config import (
+    DEFAULT_EGRESS_GUARD_BLOCKED_COUNTRY_CODES,
+    DEFAULT_EGRESS_GUARD_ENABLED,
+    DEFAULT_EGRESS_GUARD_FAIL_CLOSED,
+    DEFAULT_EGRESS_GUARD_IP_REGION_CACHE_SECONDS,
+    DEFAULT_EGRESS_GUARD_PROVIDER_TIMEOUT_SECONDS,
     DEFAULT_LISTEN_HOST,
     DEFAULT_LISTEN_PORT,
     DEFAULT_LOG_LEVEL,
@@ -16,6 +22,7 @@ from claude_code_local_proxy.config import (
     DEFAULT_UPSTREAM_BASE_URL,
     DEFAULT_UPSTREAM_TIMEOUT_SECONDS,
 )
+from claude_code_local_proxy.egress_guard import EgressGuard, EgressGuardConfig, parse_country_codes
 from claude_code_local_proxy.proxy import ProxyConfig, run_server
 from claude_code_local_proxy.sanitizer import Mode
 
@@ -27,6 +34,25 @@ def _get_sanitizer_mode() -> Mode:
     if value not in _MODES:
         raise SystemExit(f"SANITIZER_MODE must be one of {', '.join(_MODES)} (got {value!r})")
     return value
+
+
+def _parse_bool(value: str) -> bool:
+    normalized = value.strip().lower()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+    raise ValueError("expected one of: true, false, yes, no, on, off, 1, 0")
+
+
+def _env_value[T](name: str, default: T, parser: Callable[[str], T]) -> T:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    try:
+        return parser(value)
+    except ValueError as exc:
+        raise SystemExit(f"{name} is invalid: {exc}") from exc
 
 
 def _load_env() -> None:
@@ -69,6 +95,54 @@ def _build_parser() -> argparse.ArgumentParser:
         help=f"Upstream request timeout. Defaults to UPSTREAM_TIMEOUT_SECONDS or {DEFAULT_UPSTREAM_TIMEOUT_SECONDS:g}.",
     )
     parser.add_argument(
+        "--egress-guard-enabled",
+        action=argparse.BooleanOptionalAction,
+        default=_env_value(
+            "EGRESS_GUARD_ENABLED",
+            DEFAULT_EGRESS_GUARD_ENABLED,
+            _parse_bool,
+        ),
+        help="Check egress IP location before forwarding. Defaults to EGRESS_GUARD_ENABLED or enabled.",
+    )
+    parser.add_argument(
+        "--egress-guard-blocked-country-codes",
+        default=os.getenv(
+            "EGRESS_GUARD_BLOCKED_COUNTRY_CODES",
+            DEFAULT_EGRESS_GUARD_BLOCKED_COUNTRY_CODES,
+        ),
+        help="Comma-separated ISO country codes to block. Defaults to EGRESS_GUARD_BLOCKED_COUNTRY_CODES or CN,HK,MO,TW.",
+    )
+    parser.add_argument(
+        "--egress-guard-fail-closed",
+        action=argparse.BooleanOptionalAction,
+        default=_env_value(
+            "EGRESS_GUARD_FAIL_CLOSED",
+            DEFAULT_EGRESS_GUARD_FAIL_CLOSED,
+            _parse_bool,
+        ),
+        help="Block requests when egress location cannot be checked. Defaults to EGRESS_GUARD_FAIL_CLOSED or enabled.",
+    )
+    parser.add_argument(
+        "--egress-guard-provider-timeout-seconds",
+        type=float,
+        default=_env_value(
+            "EGRESS_GUARD_PROVIDER_TIMEOUT_SECONDS",
+            DEFAULT_EGRESS_GUARD_PROVIDER_TIMEOUT_SECONDS,
+            float,
+        ),
+        help=f"Per-provider egress location timeout. Defaults to EGRESS_GUARD_PROVIDER_TIMEOUT_SECONDS or {DEFAULT_EGRESS_GUARD_PROVIDER_TIMEOUT_SECONDS:g}.",
+    )
+    parser.add_argument(
+        "--egress-guard-ip-region-cache-seconds",
+        type=float,
+        default=_env_value(
+            "EGRESS_GUARD_IP_REGION_CACHE_SECONDS",
+            DEFAULT_EGRESS_GUARD_IP_REGION_CACHE_SECONDS,
+            float,
+        ),
+        help=f"Seconds to cache public-IP-to-region lookups. Defaults to EGRESS_GUARD_IP_REGION_CACHE_SECONDS or {DEFAULT_EGRESS_GUARD_IP_REGION_CACHE_SECONDS:g}.",
+    )
+    parser.add_argument(
         "--log-level",
         default=os.getenv("LOG_LEVEL", DEFAULT_LOG_LEVEL),
         help=f"Python logging level. Defaults to LOG_LEVEL or {DEFAULT_LOG_LEVEL}.",
@@ -87,8 +161,24 @@ def main(argv: list[str] | None = None) -> None:
         upstream_base_url=args.upstream_base_url,
         mode=args.sanitizer_mode,
         timeout_seconds=args.timeout_seconds,
+        egress_guard=_build_egress_guard(args),
     )
     run_server(args.listen_host, args.listen_port, config)
+
+
+def _build_egress_guard(args: argparse.Namespace) -> EgressGuard | None:
+    if not args.egress_guard_enabled:
+        return None
+    try:
+        config = EgressGuardConfig(
+            blocked_country_codes=parse_country_codes(args.egress_guard_blocked_country_codes),
+            provider_timeout_seconds=args.egress_guard_provider_timeout_seconds,
+            ip_region_cache_seconds=args.egress_guard_ip_region_cache_seconds,
+            fail_closed=args.egress_guard_fail_closed,
+        )
+    except ValueError as exc:
+        raise SystemExit(f"egress guard configuration is invalid: {exc}") from exc
+    return EgressGuard(config)
 
 
 if __name__ == "__main__":
