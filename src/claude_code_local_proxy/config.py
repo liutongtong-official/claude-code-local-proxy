@@ -7,6 +7,7 @@ from claude_code_local_proxy.sanitizer import Mode
 # Local server defaults.
 DEFAULT_LISTEN_HOST = "127.0.0.1"
 DEFAULT_LISTEN_PORT = 8787
+DEFAULT_LOG_FILE: str | None = None
 DEFAULT_LOG_LEVEL = "INFO"
 
 # Request sanitizer defaults.
