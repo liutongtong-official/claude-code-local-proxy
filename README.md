@@ -58,13 +58,13 @@ It does not log full prompts or request bodies.
 
 ### Egress guard
 
-The egress guard checks the proxy process's current public IP before each upstream request. It then looks up that public IP's country code and returns `451` without forwarding the Claude Code request upstream if the country code is blocked. By default, blocked country codes are `CN,HK,MO,TW`.
+By default, the egress guard checks the proxy process's current public IP before each upstream request. It then looks up that public IP's country code and returns `451` without forwarding the Claude Code request upstream if the country code is blocked. By default, blocked country codes are `CN,HK,MO,TW`.
 
-The guard uses public IP and geolocation providers without sending prompts, request bodies, response bodies, or credentials to those providers. It sends one request to identify the current public IP, then uses a local `public_ip -> country_code` cache to avoid repeated GeoIP lookups for the same IP.
+The guard uses public IP and geolocation providers without sending prompts, request bodies, response bodies, or credentials to those providers. When the current public IP needs to be refreshed, it sends one request to identify it, then uses a local `public_ip -> country_code` cache to avoid repeated GeoIP lookups for the same IP.
 
 For safety, the default is fail-closed: if all location providers are unreachable, the proxy returns `503` instead of forwarding the request. Set `EGRESS_GUARD_FAIL_CLOSED=false` only if availability is more important than leak prevention.
 
-By default `EGRESS_GUARD_IP_REGION_CACHE_SECONDS=86400`, so the country code for a previously seen public IP is reused for one day. The current public IP itself is still checked on every request, so a VPN route change is detected before the Claude Code request is forwarded.
+By default `EGRESS_GUARD_IP_REGION_CACHE_SECONDS=86400`, so the country code for a previously seen public IP is reused for one day. `EGRESS_GUARD_PUBLIC_IP_CACHE_SECONDS=0` keeps the current public IP cache disabled by default, so a VPN route change is detected before the next Claude Code request is forwarded. Set it to a short value such as `5` or `30` only when you want to reduce public IP provider calls during request bursts and accept that route changes may be detected after that TTL expires.
 
 ## Install
 
@@ -73,20 +73,7 @@ make install
 cp .env.example .env
 ```
 
-Runtime defaults live in `src/claude_code_local_proxy/config.py`. `.env.example` lists optional overrides only; uncomment entries in `.env` when you want to change a default:
-
-```dotenv
-# PROXY_LISTEN_HOST=127.0.0.1
-# PROXY_LISTEN_PORT=8787
-
-# UPSTREAM_BASE_URL=https://your-channel.example.com
-
-# SANITIZER_MODE=normalize
-
-# EGRESS_GUARD_ENABLED=true
-# EGRESS_GUARD_BLOCKED_COUNTRY_CODES="CN,HK,MO,TW"
-# EGRESS_GUARD_FAIL_CLOSED=true
-```
+Runtime defaults live in `src/claude_code_local_proxy/config.py`. `.env.example` lists optional overrides only; copy it to `.env` and uncomment entries there when you want to change a default.
 
 ## Run
 

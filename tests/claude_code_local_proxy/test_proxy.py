@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import http.client
 import io
 import json
 import threading
@@ -104,23 +105,20 @@ def test_proxy_rejects_chunked_request_body() -> None:
     proxy = ThreadingHTTPServer(("127.0.0.1", 0), SanitizingProxyHandler)
     proxy_thread = threading.Thread(target=proxy.serve_forever, daemon=True)
     proxy_thread.start()
+    connection: http.client.HTTPConnection | None = None
 
     try:
-        request = urllib.request.Request(
-            f"http://127.0.0.1:{proxy.server_address[1]}/v1/messages",
-            data=b"{}",
-            headers={"transfer-encoding": "chunked"},
-            method="POST",
-        )
+        connection = http.client.HTTPConnection("127.0.0.1", proxy.server_address[1], timeout=5)
+        connection.putrequest("POST", "/v1/messages")
+        connection.putheader("Transfer-Encoding", "chunked")
+        connection.endheaders()
 
-        try:
-            urllib.request.urlopen(request, timeout=5)
-        except urllib.error.HTTPError as exc:
-            assert exc.code == 501
-            assert b"chunked request bodies" in exc.read()
-        else:  # pragma: no cover - assertion branch
-            raise AssertionError("expected HTTPError")
+        response = connection.getresponse()
+        assert response.status == HTTPStatus.NOT_IMPLEMENTED
+        assert b"chunked request bodies" in response.read()
     finally:
+        if connection is not None:
+            connection.close()
         proxy.shutdown()
         proxy.server_close()
 

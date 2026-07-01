@@ -19,6 +19,7 @@ from claude_code_local_proxy.config import (
     DEFAULT_EGRESS_GUARD_FAIL_CLOSED,
     DEFAULT_EGRESS_GUARD_IP_REGION_CACHE_SECONDS,
     DEFAULT_EGRESS_GUARD_PROVIDER_TIMEOUT_SECONDS,
+    DEFAULT_EGRESS_GUARD_PUBLIC_IP_CACHE_SECONDS,
 )
 
 LOGGER = logging.getLogger(__name__)
@@ -61,12 +62,15 @@ class EgressGuardConfig:
         default_factory=lambda: parse_country_codes(DEFAULT_EGRESS_GUARD_BLOCKED_COUNTRY_CODES)
     )
     provider_timeout_seconds: float = DEFAULT_EGRESS_GUARD_PROVIDER_TIMEOUT_SECONDS
+    public_ip_cache_seconds: float = DEFAULT_EGRESS_GUARD_PUBLIC_IP_CACHE_SECONDS
     ip_region_cache_seconds: float = DEFAULT_EGRESS_GUARD_IP_REGION_CACHE_SECONDS
     fail_closed: bool = DEFAULT_EGRESS_GUARD_FAIL_CLOSED
 
     def __post_init__(self) -> None:
         if self.provider_timeout_seconds <= 0:
             raise ValueError("provider_timeout_seconds must be positive")
+        if self.public_ip_cache_seconds < 0:
+            raise ValueError("public_ip_cache_seconds must be non-negative")
         if self.ip_region_cache_seconds < 0:
             raise ValueError("ip_region_cache_seconds must be non-negative")
 
@@ -96,6 +100,12 @@ class _CachedLocation:
     cached_at: float
 
 
+@dataclass(frozen=True)
+class _CachedPublicIp:
+    ip: str
+    cached_at: float
+
+
 class EgressGuard:
     """Check the current public egress IP before an upstream request is sent."""
 
@@ -114,7 +124,9 @@ class EgressGuard:
         self._ip_providers = ip_providers or _PUBLIC_IP_PROVIDERS
         self._geo_providers = geo_providers or _GEO_PROVIDERS
         self._lock = threading.Lock()
+        self._public_ip_refresh_lock = threading.Lock()
         self._location_by_ip: dict[str, _CachedLocation] = {}
+        self._cached_public_ip: _CachedPublicIp | None = None
         self._preferred_ip_provider_name: str | None = None
 
     def ensure_allowed(self) -> EgressLocation | None:
@@ -134,6 +146,20 @@ class EgressGuard:
         return location
 
     def _current_public_ip(self) -> tuple[str | None, list[str]]:
+        if self._config.public_ip_cache_seconds <= 0:
+            return self._lookup_current_public_ip()
+
+        cached = self._cached_current_public_ip()
+        if cached is not None:
+            return cached, []
+
+        with self._public_ip_refresh_lock:
+            cached = self._cached_current_public_ip()
+            if cached is not None:
+                return cached, []
+            return self._lookup_current_public_ip()
+
+    def _lookup_current_public_ip(self) -> tuple[str | None, list[str]]:
         provider_errors: list[str] = []
         for provider in self._ordered_ip_providers():
             try:
@@ -142,8 +168,27 @@ class EgressGuard:
                 provider_errors.append(f"{provider.name}: {exc}")
                 continue
             self._remember_ip_provider(provider.name)
+            self._cache_current_public_ip(ip)
             return ip, provider_errors
         return None, provider_errors
+
+    def _cached_current_public_ip(self) -> str | None:
+        if self._config.public_ip_cache_seconds <= 0:
+            return None
+        with self._lock:
+            cached = self._cached_public_ip
+            if cached is None:
+                return None
+            if self._monotonic() - cached.cached_at >= self._config.public_ip_cache_seconds:
+                self._cached_public_ip = None
+                return None
+            return cached.ip
+
+    def _cache_current_public_ip(self, ip: str) -> None:
+        if self._config.public_ip_cache_seconds <= 0:
+            return
+        with self._lock:
+            self._cached_public_ip = _CachedPublicIp(ip, self._monotonic())
 
     def _ordered_ip_providers(self) -> tuple[PublicIpProvider, ...]:
         with self._lock:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import threading
 import urllib.request
 from typing import Any
 
@@ -13,6 +14,7 @@ from claude_code_local_proxy.egress_guard import (
     EgressGuardBlocked,
     EgressGuardConfig,
     EgressGuardUnavailable,
+    EgressLocation,
     parse_country_codes,
 )
 
@@ -131,6 +133,108 @@ def test_egress_guard_caches_ip_region_but_rechecks_current_public_ip() -> None:
     guard.ensure_allowed()
 
     assert calls == 3
+
+
+def test_egress_guard_can_cache_current_public_ip_when_configured() -> None:
+    calls = 0
+
+    def urlopen(*args: object, **kwargs: object) -> FakeResponse:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return FakeResponse("198.51.100.12\n")
+        return FakeResponse({"ip": "198.51.100.12", "country_code": "US"})
+
+    guard = EgressGuard(
+        EgressGuardConfig(
+            blocked_country_codes=frozenset({"CN"}),
+            public_ip_cache_seconds=30,
+            ip_region_cache_seconds=30,
+        ),
+        urlopen=urlopen,
+    )
+
+    guard.ensure_allowed()
+    guard.ensure_allowed()
+
+    assert calls == 2
+
+
+def test_egress_guard_deduplicates_concurrent_public_ip_refreshes() -> None:
+    start = threading.Barrier(5)
+    lock = threading.Lock()
+    public_ip_calls = 0
+
+    def urlopen(request: object, **kwargs: object) -> FakeResponse:
+        nonlocal public_ip_calls
+        assert isinstance(request, urllib.request.Request)
+        if request.full_url == "https://api.ipify.org":
+            with lock:
+                public_ip_calls += 1
+            return FakeResponse("198.51.100.12\n")
+        return FakeResponse({"ip": "198.51.100.12", "country_code": "US"})
+
+    guard = EgressGuard(
+        EgressGuardConfig(
+            blocked_country_codes=frozenset({"CN"}),
+            public_ip_cache_seconds=30,
+            ip_region_cache_seconds=30,
+        ),
+        urlopen=urlopen,
+    )
+    locations: list[EgressLocation | None] = [None] * 5
+
+    def check_allowed(index: int) -> None:
+        start.wait()
+        locations[index] = guard.ensure_allowed()
+
+    threads = [threading.Thread(target=check_allowed, args=(index,)) for index in range(5)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    assert all(location is not None for location in locations)
+    assert public_ip_calls == 1
+
+
+def test_egress_guard_refreshes_current_public_ip_after_cache_expires() -> None:
+    now = 0.0
+    calls = 0
+
+    def monotonic() -> float:
+        return now
+
+    def urlopen(*args: object, **kwargs: object) -> FakeResponse:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return FakeResponse("198.51.100.12")
+        if calls == 2:
+            return FakeResponse({"ip": "198.51.100.12", "country_code": "US"})
+        if calls == 3:
+            return FakeResponse("203.0.113.10")
+        return FakeResponse({"ip": "203.0.113.10", "country_code": "JP"})
+
+    guard = EgressGuard(
+        EgressGuardConfig(
+            blocked_country_codes=frozenset({"CN"}),
+            public_ip_cache_seconds=30,
+            ip_region_cache_seconds=30,
+        ),
+        urlopen=urlopen,
+        monotonic=monotonic,
+    )
+
+    first = guard.ensure_allowed()
+    now = 31.0
+    second = guard.ensure_allowed()
+
+    assert first is not None
+    assert second is not None
+    assert first.ip == "198.51.100.12"
+    assert second.ip == "203.0.113.10"
+    assert calls == 4
 
 
 def test_egress_guard_looks_up_region_again_when_public_ip_changes() -> None:
