@@ -1,7 +1,9 @@
 """Tests for CLI argument handling."""
 
 import logging
+import shutil
 import subprocess
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
@@ -30,6 +32,25 @@ _CLI_ENV_KEYS = (
 def _clear_cli_env(monkeypatch: pytest.MonkeyPatch) -> None:
     for key in _CLI_ENV_KEYS:
         monkeypatch.delenv(key, raising=False)
+
+
+@pytest.fixture(autouse=True)
+def _restore_logging() -> Iterator[None]:
+    root = logging.getLogger()
+    old_handlers = list(root.handlers)
+    old_level = root.level
+
+    try:
+        yield
+    finally:
+        for handler in list(root.handlers):
+            if handler not in old_handlers:
+                root.removeHandler(handler)
+                handler.close()
+        for handler in old_handlers:
+            if handler not in root.handlers:
+                root.addHandler(handler)
+        root.setLevel(old_level)
 
 
 def _flush_root_log_handlers() -> None:
@@ -125,6 +146,9 @@ def test_cli_can_write_logs_to_file_from_env(
 
 
 def test_background_make_targets_dry_run() -> None:
+    if not shutil.which("make"):
+        pytest.skip("make is not installed")
+
     project_root = Path(__file__).parents[2]
     result = subprocess.run(
         ["make", "-n", "run-bg", "stop-bg"],

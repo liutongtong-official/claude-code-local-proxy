@@ -52,7 +52,7 @@ stop-bg:  ## Stop the background proxy started by run-bg
 	fi; \
 	if kill -0 "$$PID" 2>/dev/null; then \
 		COMMAND="$$(ps -p "$$PID" -o command= 2>/dev/null || true)"; \
-		if [[ "$$COMMAND" != *claude-code-local-proxy* ]]; then \
+		if [[ -n "$$COMMAND" && "$$COMMAND" != *claude-code-local-proxy* ]]; then \
 			echo "pid $$PID does not look like claude-code-local-proxy; keeping $(PROXY_PID_FILE)"; \
 			exit 1; \
 		fi; \
