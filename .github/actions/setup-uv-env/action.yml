@@ -1,0 +1,26 @@
+name: Set up uv environment
+description: Install Python (from .python-version) and uv with caching, optionally syncing deps.
+
+inputs:
+  sync:
+    description: >-
+      Run `uv sync --frozen` to populate the project environment. Needed
+      whenever a later step shells out via `uv run` (pre-commit's mypy hook,
+      pytest); not needed for `uv build`.
+    default: "true"
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-python@v5
+      with:
+        python-version-file: .python-version
+
+    - uses: astral-sh/setup-uv@v6
+      with:
+        enable-cache: true
+        cache-dependency-glob: uv.lock
+
+    - if: inputs.sync == 'true'
+      shell: bash
+      run: uv sync --frozen
