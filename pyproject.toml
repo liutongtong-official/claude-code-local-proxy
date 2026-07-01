@@ -1,0 +1,57 @@
+[project]
+name = "claude-code-local-proxy"
+version = "0.1.0"
+description = "Local proxy for processing Claude Code requests before forwarding."
+readme = "README.md"
+authors = [
+    { name = "liutongtong", email = "liutongtong7@gmail.com" }
+]
+requires-python = ">=3.13"
+# Keep entries sorted alphabetically.
+dependencies = [
+    "python-dotenv>=1.0",
+]
+
+[project.scripts]
+claude-code-local-proxy = "claude_code_local_proxy.cli:main"
+
+[build-system]
+requires = ["uv_build>=0.10.11,<0.11.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+# Keep entries sorted alphabetically.
+dev = [
+    "mypy>=2.1",
+    "pre-commit>=4",
+    "pytest>=8",
+    "pytest-cov>=5",
+    "ruff>=0.15",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "SIM"]
+# Line length is enforced by `ruff format`; E501 only fires on lines the
+# formatter intentionally left long (long URLs, error messages, etc.).
+ignore = ["E501"]
+
+[tool.mypy]
+python_version = "3.13"
+files = ["src", "tests"]
+strict = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.coverage.run]
+# Measure by import package, not the src/ path — robust whether the package
+# is installed editable or into site-packages.
+source_pkgs = ["claude_code_local_proxy"]
+
+[tool.coverage.xml]
+output = "build/coverage/coverage.xml"

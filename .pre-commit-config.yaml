@@ -1,0 +1,50 @@
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-toml
+      - id: check-merge-conflict
+      - id: check-added-large-files
+        args: [--maxkb=500]
+      - id: mixed-line-ending
+        args: [--fix=lf]
+      - id: detect-private-key
+
+  - repo: local
+    hooks:
+      # ruff stays a file-scoped, project-env hook so its version tracks
+      # pyproject's `ruff>=0.15` — one source of truth, not a separate pinned rev.
+      # --force-exclude: pre-commit passes explicit file paths, which makes ruff
+      # skip its `exclude`/`extend-exclude` config unless this flag is set.
+      - id: ruff-check
+        name: ruff check
+        entry: uv run ruff check --fix --force-exclude
+        language: system
+        types_or: [python, pyi]
+      - id: ruff-format
+        name: ruff format
+        entry: uv run ruff format --force-exclude
+        language: system
+        types_or: [python, pyi]
+
+      # mypy/pytest invoke uv directly, matching the ruff hook above: the
+      # entry is a trivial command and the real config already lives in
+      # pyproject ([tool.mypy]/[tool.pytest]), so routing through make would
+      # add indirection without centralizing anything.
+      - id: mypy
+        name: mypy
+        entry: uv run mypy
+        language: system
+        pass_filenames: false
+        always_run: true
+
+      - id: pytest
+        name: pytest
+        entry: uv run pytest
+        language: system
+        stages: [pre-push]
+        pass_filenames: false
+        always_run: true
