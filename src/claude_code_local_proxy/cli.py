@@ -6,6 +6,7 @@ import argparse
 import logging
 import os
 from collections.abc import Callable
+from logging.handlers import TimedRotatingFileHandler
 from pathlib import Path
 
 from dotenv import find_dotenv, load_dotenv
@@ -30,6 +31,7 @@ from claude_code_local_proxy.proxy import ProxyConfig, run_server
 from claude_code_local_proxy.sanitizer import Mode
 
 _MODES: tuple[Mode, ...] = ("off", "observe", "normalize")
+_LOG_RETENTION_DAYS = 7
 
 
 def _get_sanitizer_mode() -> Mode:
@@ -188,7 +190,14 @@ def _configure_logging(level_name: str, log_file: str | None) -> None:
         try:
             log_path = Path(log_file)
             log_path.parent.mkdir(parents=True, exist_ok=True)
-            handlers.append(logging.FileHandler(log_path, encoding="utf-8"))
+            handlers.append(
+                TimedRotatingFileHandler(
+                    log_path,
+                    when="midnight",
+                    backupCount=_LOG_RETENTION_DAYS,
+                    encoding="utf-8",
+                )
+            )
         except OSError as exc:
             raise SystemExit(f"LOG_FILE is invalid: {exc}") from exc
 

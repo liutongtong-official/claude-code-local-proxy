@@ -4,6 +4,7 @@ import logging
 import shutil
 import subprocess
 from collections.abc import Iterator
+from logging.handlers import TimedRotatingFileHandler
 from pathlib import Path
 
 import pytest
@@ -124,6 +125,32 @@ def test_cli_can_write_logs_to_file(monkeypatch: pytest.MonkeyPatch, tmp_path: P
     _flush_root_log_handlers()
 
     assert "saved log marker" in log_file.read_text()
+
+
+def test_cli_rotates_file_logs_daily_with_seven_day_retention(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    log_file = tmp_path / "runtime" / "proxy.log"
+
+    def fake_run_server(host: str, port: int, config: object) -> None:
+        pass
+
+    _clear_cli_env(monkeypatch)
+    monkeypatch.setattr("claude_code_local_proxy.cli.run_server", fake_run_server)
+
+    main(["--listen-port", "0", "--log-file", str(log_file)])
+
+    file_handlers = [
+        handler
+        for handler in logging.getLogger().handlers
+        if isinstance(handler, TimedRotatingFileHandler)
+    ]
+    assert len(file_handlers) == 1
+    handler = file_handlers[0]
+    assert handler.baseFilename == str(log_file)
+    assert handler.when == "MIDNIGHT"
+    assert handler.backupCount == 7
 
 
 def test_cli_can_write_logs_to_file_from_env(
