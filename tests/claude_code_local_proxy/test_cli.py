@@ -1,5 +1,11 @@
 """Tests for CLI argument handling."""
 
+import logging
+import shutil
+import subprocess
+from collections.abc import Iterator
+from pathlib import Path
+
 import pytest
 
 from claude_code_local_proxy.cli import main
@@ -18,6 +24,7 @@ _CLI_ENV_KEYS = (
     "EGRESS_GUARD_PROVIDER_TIMEOUT_SECONDS",
     "EGRESS_GUARD_PUBLIC_IP_CACHE_SECONDS",
     "EGRESS_GUARD_IP_REGION_CACHE_SECONDS",
+    "LOG_FILE",
     "LOG_LEVEL",
 )
 
@@ -25,6 +32,30 @@ _CLI_ENV_KEYS = (
 def _clear_cli_env(monkeypatch: pytest.MonkeyPatch) -> None:
     for key in _CLI_ENV_KEYS:
         monkeypatch.delenv(key, raising=False)
+
+
+@pytest.fixture(autouse=True)
+def _restore_logging() -> Iterator[None]:
+    root = logging.getLogger()
+    old_handlers = list(root.handlers)
+    old_level = root.level
+
+    try:
+        yield
+    finally:
+        for handler in list(root.handlers):
+            if handler not in old_handlers:
+                root.removeHandler(handler)
+                handler.close()
+        for handler in old_handlers:
+            if handler not in root.handlers:
+                root.addHandler(handler)
+        root.setLevel(old_level)
+
+
+def _flush_root_log_handlers() -> None:
+    for handler in logging.getLogger().handlers:
+        handler.flush()
 
 
 def test_cli_help_runs(capsys: pytest.CaptureFixture[str]) -> None:
@@ -78,6 +109,57 @@ def test_cli_can_disable_egress_guard(monkeypatch: pytest.MonkeyPatch) -> None:
     config = captured["config"]
     assert isinstance(config, ProxyConfig)
     assert config.egress_guard is None
+
+
+def test_cli_can_write_logs_to_file(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    log_file = tmp_path / "runtime" / "proxy.log"
+
+    def fake_run_server(host: str, port: int, config: object) -> None:
+        logging.getLogger("claude_code_local_proxy.tests").warning("saved log marker")
+
+    _clear_cli_env(monkeypatch)
+    monkeypatch.setattr("claude_code_local_proxy.cli.run_server", fake_run_server)
+
+    main(["--listen-port", "0", "--log-file", str(log_file)])
+    _flush_root_log_handlers()
+
+    assert "saved log marker" in log_file.read_text()
+
+
+def test_cli_can_write_logs_to_file_from_env(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    log_file = tmp_path / "runtime" / "proxy.log"
+
+    def fake_run_server(host: str, port: int, config: object) -> None:
+        logging.getLogger("claude_code_local_proxy.tests").warning("saved log marker")
+
+    _clear_cli_env(monkeypatch)
+    monkeypatch.setenv("LOG_FILE", str(log_file))
+    monkeypatch.setattr("claude_code_local_proxy.cli.run_server", fake_run_server)
+
+    main(["--listen-port", "0"])
+    _flush_root_log_handlers()
+
+    assert "saved log marker" in log_file.read_text()
+
+
+def test_background_make_targets_dry_run() -> None:
+    if not shutil.which("make"):
+        pytest.skip("make is not installed")
+
+    project_root = Path(__file__).parents[2]
+    result = subprocess.run(
+        ["make", "-n", "run-bg", "stop-bg"],
+        cwd=project_root,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    assert "nohup uv run claude-code-local-proxy" in result.stdout
+    assert "proxy stopped pid=$PID" in result.stdout
 
 
 def test_cli_rejects_invalid_egress_guard_country_code(monkeypatch: pytest.MonkeyPatch) -> None:

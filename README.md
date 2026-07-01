@@ -77,10 +77,28 @@ Runtime defaults live in `src/claude_code_local_proxy/config.py`. `.env.example`
 
 ## Run
 
-Start the proxy:
+Start the proxy in the foreground:
 
 ```bash
 uv run claude-code-local-proxy
+```
+
+To keep logs in a file as well as the console, pass `--log-file` or set `LOG_FILE`:
+
+```bash
+uv run claude-code-local-proxy --log-file logs/claude-code-local-proxy.log
+```
+
+Start the proxy in the background:
+
+```bash
+make run-bg
+```
+
+The background target writes the process ID to `logs/claude-code-local-proxy.pid` and application logs to `logs/claude-code-local-proxy.log`. Stop that background process with:
+
+```bash
+make stop-bg
 ```
 
 Point Claude Code at the local proxy:

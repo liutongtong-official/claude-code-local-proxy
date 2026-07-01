@@ -6,6 +6,7 @@ import argparse
 import logging
 import os
 from collections.abc import Callable
+from pathlib import Path
 
 from dotenv import find_dotenv, load_dotenv
 
@@ -18,6 +19,7 @@ from claude_code_local_proxy.config import (
     DEFAULT_EGRESS_GUARD_PUBLIC_IP_CACHE_SECONDS,
     DEFAULT_LISTEN_HOST,
     DEFAULT_LISTEN_PORT,
+    DEFAULT_LOG_FILE,
     DEFAULT_LOG_LEVEL,
     DEFAULT_SANITIZER_MODE,
     DEFAULT_UPSTREAM_BASE_URL,
@@ -158,16 +160,19 @@ def _build_parser() -> argparse.ArgumentParser:
         default=os.getenv("LOG_LEVEL", DEFAULT_LOG_LEVEL),
         help=f"Python logging level. Defaults to LOG_LEVEL or {DEFAULT_LOG_LEVEL}.",
     )
+    parser.add_argument(
+        "--log-file",
+        default=os.getenv("LOG_FILE", DEFAULT_LOG_FILE),
+        help="Optional path to also write logs to. Defaults to LOG_FILE or console-only logging.",
+    )
     return parser
 
 
 def main(argv: list[str] | None = None) -> None:
     _load_env()
     args = _build_parser().parse_args(argv)
-    logging.basicConfig(
-        level=getattr(logging, args.log_level.upper(), logging.INFO),
-        format="%(asctime)s %(levelname)s %(name)s %(message)s",
-    )
+    _configure_logging(args.log_level, args.log_file)
+
     config = ProxyConfig(
         upstream_base_url=args.upstream_base_url,
         mode=args.sanitizer_mode,
@@ -175,6 +180,24 @@ def main(argv: list[str] | None = None) -> None:
         egress_guard=_build_egress_guard(args),
     )
     run_server(args.listen_host, args.listen_port, config)
+
+
+def _configure_logging(level_name: str, log_file: str | None) -> None:
+    handlers: list[logging.Handler] = [logging.StreamHandler()]
+    if log_file:
+        try:
+            log_path = Path(log_file)
+            log_path.parent.mkdir(parents=True, exist_ok=True)
+            handlers.append(logging.FileHandler(log_path, encoding="utf-8"))
+        except OSError as exc:
+            raise SystemExit(f"LOG_FILE is invalid: {exc}") from exc
+
+    logging.basicConfig(
+        level=getattr(logging, level_name.upper(), logging.INFO),
+        format="%(asctime)s %(levelname)s %(name)s %(message)s",
+        handlers=handlers,
+        force=True,
+    )
 
 
 def _build_egress_guard(args: argparse.Namespace) -> EgressGuard | None:

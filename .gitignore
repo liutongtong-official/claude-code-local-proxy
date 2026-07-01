@@ -8,6 +8,9 @@ dist/
 wheels/
 *.egg-info/
 
+# Runtime logs
+logs/
+
 # Caches
 .pytest_cache/
 .ruff_cache/
