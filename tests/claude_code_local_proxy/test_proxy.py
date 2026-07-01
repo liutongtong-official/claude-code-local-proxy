@@ -14,6 +14,11 @@ from typing import ClassVar
 
 import pytest
 
+from claude_code_local_proxy.egress_guard import (
+    EgressGuardBlocked,
+    EgressGuardUnavailable,
+    EgressLocation,
+)
 from claude_code_local_proxy.proxy import (
     ProxyConfig,
     RequestBodyError,
@@ -23,8 +28,10 @@ from claude_code_local_proxy.proxy import (
 
 class CaptureHandler(BaseHTTPRequestHandler):
     captured_body: ClassVar[bytes] = b""
+    request_count: ClassVar[int] = 0
 
     def do_POST(self) -> None:  # noqa: N802
+        type(self).request_count += 1
         content_length = int(self.headers["content-length"])
         type(self).captured_body = self.rfile.read(content_length)
         response = b'{"ok":true}'
@@ -38,8 +45,21 @@ class CaptureHandler(BaseHTTPRequestHandler):
         return
 
 
+class BlockingGuard:
+    def ensure_allowed(self) -> None:
+        raise EgressGuardBlocked(
+            EgressLocation(provider="test", country_code="CN", ip="203.0.113.10")
+        )
+
+
+class UnavailableGuard:
+    def ensure_allowed(self) -> None:
+        raise EgressGuardUnavailable(("test: unavailable",))
+
+
 def test_proxy_normalizes_json_body_before_forwarding() -> None:
     upstream = HTTPServer(("127.0.0.1", 0), CaptureHandler)
+    CaptureHandler.request_count = 0
     upstream_thread = threading.Thread(target=upstream.serve_forever, daemon=True)
     upstream_thread.start()
     upstream_url = f"http://127.0.0.1:{upstream.server_port}"
@@ -67,6 +87,7 @@ def test_proxy_normalizes_json_body_before_forwarding() -> None:
             assert response.read() == b'{"ok":true}'
 
         assert json.loads(CaptureHandler.captured_body) == {"system": "Today's date is 2026-06-30."}
+        assert CaptureHandler.request_count == 1
     finally:
         proxy.shutdown()
         upstream.shutdown()
@@ -102,6 +123,82 @@ def test_proxy_rejects_chunked_request_body() -> None:
     finally:
         proxy.shutdown()
         proxy.server_close()
+
+
+def test_proxy_blocks_request_before_forwarding_when_egress_is_blocked() -> None:
+    upstream = HTTPServer(("127.0.0.1", 0), CaptureHandler)
+    CaptureHandler.request_count = 0
+    upstream_thread = threading.Thread(target=upstream.serve_forever, daemon=True)
+    upstream_thread.start()
+    upstream_url = f"http://127.0.0.1:{upstream.server_port}"
+
+    SanitizingProxyHandler.config = ProxyConfig(
+        upstream_base_url=upstream_url,
+        timeout_seconds=5,
+        mode="normalize",
+        egress_guard=BlockingGuard(),
+    )
+    proxy = ThreadingHTTPServer(("127.0.0.1", 0), SanitizingProxyHandler)
+    proxy_thread = threading.Thread(target=proxy.serve_forever, daemon=True)
+    proxy_thread.start()
+
+    try:
+        request = urllib.request.Request(
+            f"http://127.0.0.1:{proxy.server_address[1]}/v1/messages",
+            data=b'{"prompt":"secret"}',
+            headers={"content-type": "application/json"},
+            method="POST",
+        )
+
+        with pytest.raises(urllib.error.HTTPError) as exc_info:
+            urllib.request.urlopen(request, timeout=5)
+
+        assert exc_info.value.code == HTTPStatus.UNAVAILABLE_FOR_LEGAL_REASONS
+        assert b"blocked region" in exc_info.value.read()
+        assert CaptureHandler.request_count == 0
+    finally:
+        proxy.shutdown()
+        upstream.shutdown()
+        proxy.server_close()
+        upstream.server_close()
+
+
+def test_proxy_returns_503_before_forwarding_when_egress_is_unavailable() -> None:
+    upstream = HTTPServer(("127.0.0.1", 0), CaptureHandler)
+    CaptureHandler.request_count = 0
+    upstream_thread = threading.Thread(target=upstream.serve_forever, daemon=True)
+    upstream_thread.start()
+    upstream_url = f"http://127.0.0.1:{upstream.server_port}"
+
+    SanitizingProxyHandler.config = ProxyConfig(
+        upstream_base_url=upstream_url,
+        timeout_seconds=5,
+        mode="normalize",
+        egress_guard=UnavailableGuard(),
+    )
+    proxy = ThreadingHTTPServer(("127.0.0.1", 0), SanitizingProxyHandler)
+    proxy_thread = threading.Thread(target=proxy.serve_forever, daemon=True)
+    proxy_thread.start()
+
+    try:
+        request = urllib.request.Request(
+            f"http://127.0.0.1:{proxy.server_address[1]}/v1/messages",
+            data=b'{"prompt":"secret"}',
+            headers={"content-type": "application/json"},
+            method="POST",
+        )
+
+        with pytest.raises(urllib.error.HTTPError) as exc_info:
+            urllib.request.urlopen(request, timeout=5)
+
+        assert exc_info.value.code == HTTPStatus.SERVICE_UNAVAILABLE
+        assert b"fail-closed policy" in exc_info.value.read()
+        assert CaptureHandler.request_count == 0
+    finally:
+        proxy.shutdown()
+        upstream.shutdown()
+        proxy.server_close()
+        upstream.server_close()
 
 
 def test_proxy_strips_query_from_marker_logs(caplog: pytest.LogCaptureFixture) -> None:

@@ -13,6 +13,11 @@ from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, ClassVar
 
+from claude_code_local_proxy.egress_guard import (
+    EgressChecker,
+    EgressGuardBlocked,
+    EgressGuardUnavailable,
+)
 from claude_code_local_proxy.sanitizer import Mode, SanitizeStats, sanitize_json_value
 
 LOGGER = logging.getLogger(__name__)
@@ -35,6 +40,7 @@ class ProxyConfig:
     upstream_base_url: str
     timeout_seconds: float
     mode: Mode = "normalize"
+    egress_guard: EgressChecker | None = None
 
 
 class RequestBodyError(Exception):
@@ -78,6 +84,9 @@ class SanitizingProxyHandler(BaseHTTPRequestHandler):
         LOGGER.info("%s - %s %s", self.address_string(), self.command, self._safe_log_path())
 
     def _proxy(self) -> None:
+        if not self._egress_allowed():
+            return
+
         try:
             body = self._read_body()
         except RequestBodyError as exc:
@@ -115,6 +124,42 @@ class SanitizingProxyHandler(BaseHTTPRequestHandler):
 
         with response:
             self._relay_response_safely(response.status, response.headers, response)
+
+    def _egress_allowed(self) -> bool:
+        if self.config.egress_guard is None:
+            return True
+        try:
+            location = self.config.egress_guard.ensure_allowed()
+        except EgressGuardBlocked as exc:
+            location = exc.location
+            LOGGER.warning(
+                "egress blocked path=%s country_code=%s provider=%s ip=%s",
+                self._safe_log_path(),
+                location.country_code,
+                location.provider,
+                location.ip or "?",
+            )
+            self.close_connection = True
+            self._send_json_error(HTTPStatus.UNAVAILABLE_FOR_LEGAL_REASONS, str(exc))
+            return False
+        except EgressGuardUnavailable as exc:
+            LOGGER.warning(
+                "egress location unavailable path=%s provider_errors=%s",
+                self._safe_log_path(),
+                "; ".join(exc.provider_errors) or "none",
+            )
+            self.close_connection = True
+            self._send_json_error(HTTPStatus.SERVICE_UNAVAILABLE, str(exc))
+            return False
+        if location is not None:
+            LOGGER.debug(
+                "egress allowed path=%s country_code=%s provider=%s ip=%s",
+                self._safe_log_path(),
+                location.country_code,
+                location.provider,
+                location.ip or "?",
+            )
+        return True
 
     def _read_body(self) -> bytes:
         if self.headers.get("transfer-encoding", "").lower() == "chunked":
