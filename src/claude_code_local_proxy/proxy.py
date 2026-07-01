@@ -105,7 +105,8 @@ class SanitizingProxyHandler(BaseHTTPRequestHandler):
         try:
             response = urllib.request.urlopen(request, timeout=self.config.timeout_seconds)
         except urllib.error.HTTPError as exc:
-            self._relay_response_safely(exc.code, exc.headers, exc)
+            with exc:
+                self._relay_response_safely(exc.code, exc.headers, exc)
             return
         except Exception as exc:  # pragma: no cover - exercised as runtime safety net
             LOGGER.exception("upstream request failed before response started")
@@ -132,14 +133,17 @@ class SanitizingProxyHandler(BaseHTTPRequestHandler):
             raise RequestBodyError(HTTPStatus.BAD_REQUEST, "invalid Content-Length")
         if length > _MAX_REQUEST_BODY_BYTES:
             raise RequestBodyError(HTTPStatus.REQUEST_ENTITY_TOO_LARGE, "request body too large")
-        return self.rfile.read(length)
+        body = self.rfile.read(length)
+        if len(body) < length:
+            raise RequestBodyError(HTTPStatus.BAD_REQUEST, "incomplete request body")
+        return body
 
     def _maybe_sanitize_body(self, body: bytes) -> tuple[bytes, SanitizeStats]:
         if not body or self.config.mode == "off" or not self._is_json_request():
             return body, SanitizeStats()
         try:
             decoded = json.loads(body)
-        except json.JSONDecodeError:
+        except ValueError:
             return body, SanitizeStats()
         sanitized, stats = sanitize_json_value(decoded, self.config.mode)
         if self.config.mode != "normalize" or not stats.changed:
@@ -186,7 +190,7 @@ class SanitizingProxyHandler(BaseHTTPRequestHandler):
         hop_by_hop = _hop_by_hop_header_names(headers)
         for key, value in headers.items():  # type: ignore[attr-defined]
             lower = key.lower()
-            if lower in hop_by_hop:
+            if lower in hop_by_hop or lower in {"server", "date"}:
                 continue
             if lower == "content-length":
                 has_content_length = True
