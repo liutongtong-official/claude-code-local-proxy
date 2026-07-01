@@ -15,6 +15,7 @@ from claude_code_local_proxy.config import (
     DEFAULT_EGRESS_GUARD_FAIL_CLOSED,
     DEFAULT_EGRESS_GUARD_IP_REGION_CACHE_SECONDS,
     DEFAULT_EGRESS_GUARD_PROVIDER_TIMEOUT_SECONDS,
+    DEFAULT_EGRESS_GUARD_PUBLIC_IP_CACHE_SECONDS,
     DEFAULT_LISTEN_HOST,
     DEFAULT_LISTEN_PORT,
     DEFAULT_LOG_LEVEL,
@@ -133,6 +134,16 @@ def _build_parser() -> argparse.ArgumentParser:
         help=f"Per-provider egress location timeout. Defaults to EGRESS_GUARD_PROVIDER_TIMEOUT_SECONDS or {DEFAULT_EGRESS_GUARD_PROVIDER_TIMEOUT_SECONDS:g}.",
     )
     parser.add_argument(
+        "--egress-guard-public-ip-cache-seconds",
+        type=float,
+        default=_env_value(
+            "EGRESS_GUARD_PUBLIC_IP_CACHE_SECONDS",
+            DEFAULT_EGRESS_GUARD_PUBLIC_IP_CACHE_SECONDS,
+            float,
+        ),
+        help=f"Seconds to cache the current public IP check. Defaults to EGRESS_GUARD_PUBLIC_IP_CACHE_SECONDS or {DEFAULT_EGRESS_GUARD_PUBLIC_IP_CACHE_SECONDS:g}.",
+    )
+    parser.add_argument(
         "--egress-guard-ip-region-cache-seconds",
         type=float,
         default=_env_value(
@@ -173,6 +184,7 @@ def _build_egress_guard(args: argparse.Namespace) -> EgressGuard | None:
         config = EgressGuardConfig(
             blocked_country_codes=parse_country_codes(args.egress_guard_blocked_country_codes),
             provider_timeout_seconds=args.egress_guard_provider_timeout_seconds,
+            public_ip_cache_seconds=args.egress_guard_public_ip_cache_seconds,
             ip_region_cache_seconds=args.egress_guard_ip_region_cache_seconds,
             fail_closed=args.egress_guard_fail_closed,
         )
