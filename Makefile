@@ -7,6 +7,7 @@ LOG_DIR ?= logs
 PROXY_LOG_FILE ?= $(LOG_DIR)/claude-code-local-proxy.log
 PROXY_PID_FILE ?= $(LOG_DIR)/claude-code-local-proxy.pid
 AUTOSTART_LABEL ?= local.claude-code-local-proxy
+LAUNCH_AGENT_TEMPLATE ?= packaging/launchd/local.claude-code-local-proxy.plist.in
 LAUNCH_AGENT_DIR ?= $(HOME)/Library/LaunchAgents
 LAUNCH_AGENT_PLIST ?= $(LAUNCH_AGENT_DIR)/$(AUTOSTART_LABEL).plist
 UV_BIN ?= $(shell command -v uv 2>/dev/null)
@@ -88,42 +89,15 @@ install-autostart:  ## Install a macOS LaunchAgent that starts the proxy at logi
 	fi
 	@mkdir -p "$(LAUNCH_AGENT_DIR)" "$(LOG_DIR)"
 	@$(MAKE) --no-print-directory stop-bg
-	@{ \
-		printf '%s\n' '<?xml version="1.0" encoding="UTF-8"?>'; \
-		printf '%s\n' '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">'; \
-		printf '%s\n' '<plist version="1.0">'; \
-		printf '%s\n' '<dict>'; \
-		printf '%s\n' '	<key>Label</key>'; \
-		printf '%s\n' '	<string>$(AUTOSTART_LABEL)</string>'; \
-		printf '%s\n' '	<key>ProgramArguments</key>'; \
-		printf '%s\n' '	<array>'; \
-		printf '%s\n' '		<string>$(UV_BIN)</string>'; \
-		printf '%s\n' '		<string>run</string>'; \
-		printf '%s\n' '		<string>claude-code-local-proxy</string>'; \
-		printf '%s\n' '		<string>--log-file</string>'; \
-		printf '%s\n' '		<string>$(abspath $(PROXY_LOG_FILE))</string>'; \
-		printf '%s\n' '	</array>'; \
-		printf '%s\n' '	<key>WorkingDirectory</key>'; \
-		printf '%s\n' '	<string>$(CURDIR)</string>'; \
-		printf '%s\n' '	<key>EnvironmentVariables</key>'; \
-		printf '%s\n' '	<dict>'; \
-		printf '%s\n' '		<key>PATH</key>'; \
-		printf '%s\n' '		<string>$(LAUNCHD_PATH)</string>'; \
-		printf '%s\n' '	</dict>'; \
-		printf '%s\n' '	<key>RunAtLoad</key>'; \
-		printf '%s\n' '	<true/>'; \
-		printf '%s\n' '	<key>KeepAlive</key>'; \
-		printf '%s\n' '	<dict>'; \
-		printf '%s\n' '		<key>SuccessfulExit</key>'; \
-		printf '%s\n' '		<false/>'; \
-		printf '%s\n' '	</dict>'; \
-		printf '%s\n' '	<key>StandardOutPath</key>'; \
-		printf '%s\n' '	<string>$(abspath $(LOG_DIR))/claude-code-local-proxy.launchd.out.log</string>'; \
-		printf '%s\n' '	<key>StandardErrorPath</key>'; \
-		printf '%s\n' '	<string>$(abspath $(LOG_DIR))/claude-code-local-proxy.launchd.err.log</string>'; \
-		printf '%s\n' '</dict>'; \
-		printf '%s\n' '</plist>'; \
-	} > "$(LAUNCH_AGENT_PLIST)"
+	@AUTOSTART_LABEL="$(AUTOSTART_LABEL)" \
+		UV_BIN="$(UV_BIN)" \
+		PROXY_LOG_FILE="$(abspath $(PROXY_LOG_FILE))" \
+		WORKING_DIRECTORY="$(CURDIR)" \
+		LAUNCHD_PATH="$(LAUNCHD_PATH)" \
+		STDOUT_LOG_FILE="$(abspath $(LOG_DIR))/claude-code-local-proxy.launchd.out.log" \
+		STDERR_LOG_FILE="$(abspath $(LOG_DIR))/claude-code-local-proxy.launchd.err.log" \
+		"$(UV_BIN)" run python -c 'import os; from pathlib import Path; from string import Template; from xml.sax.saxutils import escape; names = ("AUTOSTART_LABEL", "UV_BIN", "PROXY_LOG_FILE", "WORKING_DIRECTORY", "LAUNCHD_PATH", "STDOUT_LOG_FILE", "STDERR_LOG_FILE"); values = {name: escape(os.environ[name]) for name in names}; rendered = Template(Path("$(LAUNCH_AGENT_TEMPLATE)").read_text(encoding="utf-8")).substitute(values); Path("$(LAUNCH_AGENT_PLIST)").write_text(rendered, encoding="utf-8")'
+	@plutil -lint "$(LAUNCH_AGENT_PLIST)" >/dev/null
 	@launchctl bootout "gui/$$(id -u)/$(AUTOSTART_LABEL)" >/dev/null 2>&1 || true
 	@launchctl bootstrap "gui/$$(id -u)" "$(LAUNCH_AGENT_PLIST)"
 	@launchctl enable "gui/$$(id -u)/$(AUTOSTART_LABEL)"
