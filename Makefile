@@ -124,7 +124,7 @@ install-autostart:  ## Install a macOS LaunchAgent that starts the proxy at logi
 		printf '%s\n' '</dict>'; \
 		printf '%s\n' '</plist>'; \
 	} > "$(LAUNCH_AGENT_PLIST)"
-	@launchctl bootout "gui/$$(id -u)" "$(LAUNCH_AGENT_PLIST)" >/dev/null 2>&1 || true
+	@launchctl bootout "gui/$$(id -u)/$(AUTOSTART_LABEL)" >/dev/null 2>&1 || true
 	@launchctl bootstrap "gui/$$(id -u)" "$(LAUNCH_AGENT_PLIST)"
 	@launchctl enable "gui/$$(id -u)/$(AUTOSTART_LABEL)"
 	@launchctl kickstart -k "gui/$$(id -u)/$(AUTOSTART_LABEL)"
@@ -135,7 +135,7 @@ uninstall-autostart:  ## Uninstall the macOS LaunchAgent used for login autostar
 		echo "uninstall-autostart is supported on macOS only"; \
 		exit 1; \
 	fi
-	@launchctl bootout "gui/$$(id -u)" "$(LAUNCH_AGENT_PLIST)" >/dev/null 2>&1 || true
+	@launchctl bootout "gui/$$(id -u)/$(AUTOSTART_LABEL)" >/dev/null 2>&1 || true
 	@rm -f "$(LAUNCH_AGENT_PLIST)"
 	@echo "autostart uninstalled label=$(AUTOSTART_LABEL)"
 
