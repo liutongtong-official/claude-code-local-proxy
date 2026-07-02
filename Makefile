@@ -16,8 +16,10 @@ LAUNCHD_PATH ?= /usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin:/usr/local/bin
 .PHONY: help install run-bg stop-bg install-autostart uninstall-autostart status-autostart fmt lint type test test-coverage check hooks
 
 help:  ## Show available targets
-	@awk 'BEGIN {FS = ":.*##"; printf "Usage: make <target>\n\nTargets:\n"} \
-	      /^[a-zA-Z_-]+:.*##/ { printf "  \033[36m%-10s\033[0m %s\n", $$1, $$2 }' $(MAKEFILE_LIST)
+	@awk 'BEGIN {FS = ":.*##"} \
+	      /^[a-zA-Z_-]+:.*##/ { names[++n] = $$1; descs[n] = $$2; if (length($$1) > w) w = length($$1) } \
+	      END { printf "Usage: make <target>\n\nTargets:\n"; \
+	            for (i = 1; i <= n; i++) printf "  \033[36m%-*s\033[0m %s\n", w, names[i], descs[i] }' $(MAKEFILE_LIST)
 
 install:  ## Sync dependencies and install pre-commit hooks
 	uv sync
