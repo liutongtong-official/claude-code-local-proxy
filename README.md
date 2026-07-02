@@ -101,6 +101,19 @@ The background target writes the process ID to `logs/claude-code-local-proxy.pid
 make stop-bg
 ```
 
+On macOS, install a user LaunchAgent so the proxy starts automatically when you log in:
+
+```bash
+make install-autostart
+```
+
+The LaunchAgent runs the same proxy command from this project directory, writes application logs to `logs/claude-code-local-proxy.log`, and loads `.env` from the project root. Installing it stops the manual `make run-bg` process first so launchd can own the running service. Check or remove it with:
+
+```bash
+make status-autostart
+make uninstall-autostart
+```
+
 Point Claude Code at the local proxy:
 
 ```bash

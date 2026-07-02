@@ -6,8 +6,14 @@ SHELL := /bin/bash
 LOG_DIR ?= logs
 PROXY_LOG_FILE ?= $(LOG_DIR)/claude-code-local-proxy.log
 PROXY_PID_FILE ?= $(LOG_DIR)/claude-code-local-proxy.pid
+AUTOSTART_LABEL ?= local.claude-code-local-proxy
+LAUNCH_AGENT_TEMPLATE ?= scripts/launchd/local.claude-code-local-proxy.plist.in
+LAUNCH_AGENT_DIR ?= $(HOME)/Library/LaunchAgents
+LAUNCH_AGENT_PLIST ?= $(LAUNCH_AGENT_DIR)/$(AUTOSTART_LABEL).plist
+UV_BIN ?= $(shell command -v uv 2>/dev/null)
+LAUNCHD_PATH ?= /usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin:/usr/local/bin
 
-.PHONY: help install run-bg stop-bg fmt lint type test test-coverage check hooks
+.PHONY: help install run-bg stop-bg install-autostart uninstall-autostart status-autostart fmt lint type test test-coverage check hooks
 
 help:  ## Show available targets
 	@awk 'BEGIN {FS = ":.*##"; printf "Usage: make <target>\n\nTargets:\n"} \
@@ -71,6 +77,49 @@ stop-bg:  ## Stop the background proxy started by run-bg
 		echo "removed stale pid file pid=$$PID"; \
 		rm -f "$(PROXY_PID_FILE)"; \
 	fi
+
+install-autostart:  ## Install a macOS LaunchAgent that starts the proxy at login
+	@if [[ "$$(uname -s)" != "Darwin" ]]; then \
+		echo "install-autostart is supported on macOS only"; \
+		exit 1; \
+	fi
+	@if [[ -z "$(UV_BIN)" ]]; then \
+		echo "uv was not found in PATH"; \
+		exit 1; \
+	fi
+	@mkdir -p "$(LAUNCH_AGENT_DIR)" "$(LOG_DIR)"
+	@$(MAKE) --no-print-directory stop-bg
+	@AUTOSTART_LABEL="$(AUTOSTART_LABEL)" \
+		UV_BIN="$(UV_BIN)" \
+		PROXY_LOG_FILE="$(abspath $(PROXY_LOG_FILE))" \
+		WORKING_DIRECTORY="$(CURDIR)" \
+		LAUNCHD_PATH="$(LAUNCHD_PATH)" \
+		STDOUT_LOG_FILE="$(abspath $(LOG_DIR))/claude-code-local-proxy.launchd.out.log" \
+		STDERR_LOG_FILE="$(abspath $(LOG_DIR))/claude-code-local-proxy.launchd.err.log" \
+		"$(UV_BIN)" run python -c 'import os; from pathlib import Path; from string import Template; from xml.sax.saxutils import escape; names = ("AUTOSTART_LABEL", "UV_BIN", "PROXY_LOG_FILE", "WORKING_DIRECTORY", "LAUNCHD_PATH", "STDOUT_LOG_FILE", "STDERR_LOG_FILE"); values = {name: escape(os.environ[name]) for name in names}; rendered = Template(Path("$(LAUNCH_AGENT_TEMPLATE)").read_text(encoding="utf-8")).substitute(values); Path("$(LAUNCH_AGENT_PLIST)").write_text(rendered, encoding="utf-8")'
+	@plutil -lint "$(LAUNCH_AGENT_PLIST)" >/dev/null
+	@launchctl bootout "gui/$$(id -u)/$(AUTOSTART_LABEL)" >/dev/null 2>&1 || true
+	@launchctl bootstrap "gui/$$(id -u)" "$(LAUNCH_AGENT_PLIST)"
+	@launchctl enable "gui/$$(id -u)/$(AUTOSTART_LABEL)"
+	@launchctl kickstart -k "gui/$$(id -u)/$(AUTOSTART_LABEL)"
+	@echo "autostart installed label=$(AUTOSTART_LABEL) plist=$(LAUNCH_AGENT_PLIST)"
+
+uninstall-autostart:  ## Uninstall the macOS LaunchAgent used for login autostart
+	@if [[ "$$(uname -s)" != "Darwin" ]]; then \
+		echo "uninstall-autostart is supported on macOS only"; \
+		exit 1; \
+	fi
+	@launchctl bootout "gui/$$(id -u)/$(AUTOSTART_LABEL)" >/dev/null 2>&1 || true
+	@rm -f "$(LAUNCH_AGENT_PLIST)"
+	@echo "autostart uninstalled label=$(AUTOSTART_LABEL)"
+
+status-autostart:  ## Show the macOS LaunchAgent status
+	@if [[ "$$(uname -s)" != "Darwin" ]]; then \
+		echo "status-autostart is supported on macOS only"; \
+		exit 1; \
+	fi
+	@echo "plist=$(LAUNCH_AGENT_PLIST)"
+	@launchctl print "gui/$$(id -u)/$(AUTOSTART_LABEL)" || true
 
 fmt:  ## Format code (ruff format + ruff check --fix)
 	uv run ruff format
