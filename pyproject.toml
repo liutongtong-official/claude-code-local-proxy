@@ -46,7 +46,9 @@ strict = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-q"
+# importlib import mode: load each test file by path under a unique module
+# name, so mirrored test dirs can hold same-named files without collision.
+addopts = "-q --import-mode=importlib"
 
 [tool.coverage.run]
 # Measure by import package, not the src/ path — robust whether the package

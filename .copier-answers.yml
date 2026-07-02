@@ -1,0 +1,10 @@
+# Changes here will be overwritten by Copier; NEVER EDIT MANUALLY
+_commit: v0.1.7
+_src_path: git@github.com-official:liutongtong-official/python-project-template.git
+author_email: liutongtong7@gmail.com
+author_name: liutongtong
+description: Local proxy for processing Claude Code requests before forwarding.
+package_name: claude_code_local_proxy
+project_name: claude-code-local-proxy
+project_type: app
+python_version: '3.13'
