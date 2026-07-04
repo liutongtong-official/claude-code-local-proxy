@@ -13,10 +13,21 @@ class BaseUrlRule:
     name = "base_url"
 
     def __init__(self, local_base_urls: tuple[str, ...], public_base_url: str) -> None:
+        normalized_public = _normalize_base_url(public_base_url)
+        if not normalized_public:
+            raise ValueError("public_base_url must not be empty")
+        self.public_base_url = normalized_public
+
         self.local_base_urls = tuple(
-            sorted({_normalize_base_url(url) for url in local_base_urls}, key=len, reverse=True)
+            sorted(
+                {url for url in (_normalize_base_url(url) for url in local_base_urls) if url},
+                key=len,
+                reverse=True,
+            )
         )
-        self.public_base_url = _normalize_base_url(public_base_url)
+        if not self.local_base_urls:
+            raise ValueError("local_base_urls must contain at least one non-empty URL")
+        self._patterns = tuple(_base_url_pattern(url) for url in self.local_base_urls)
 
     def apply(self, text: str, mode: Mode) -> tuple[str, SanitizeStats]:
         """Apply the base-url rule to one string."""
@@ -25,8 +36,7 @@ class BaseUrlRule:
         base_urls = 0
         replacements = 0
         changed = False
-        for local_base_url in self.local_base_urls:
-            pattern = _base_url_pattern(local_base_url)
+        for local_base_url, pattern in zip(self.local_base_urls, self._patterns, strict=True):
             matches = tuple(pattern.finditer(current))
             count = len(matches)
             if count == 0:
