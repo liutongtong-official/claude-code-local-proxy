@@ -15,7 +15,9 @@ from claude_code_local_proxy.config import (
     DEFAULT_EGRESS_GUARD_BLOCKED_COUNTRY_CODES,
     DEFAULT_EGRESS_GUARD_ENABLED,
     DEFAULT_EGRESS_GUARD_FAIL_CLOSED,
+    DEFAULT_EGRESS_GUARD_FIXED_IP,
     DEFAULT_EGRESS_GUARD_IP_REGION_CACHE_SECONDS,
+    DEFAULT_EGRESS_GUARD_MODE,
     DEFAULT_EGRESS_GUARD_PROVIDER_TIMEOUT_SECONDS,
     DEFAULT_EGRESS_GUARD_PUBLIC_IP_CACHE_SECONDS,
     DEFAULT_LISTEN_HOST,
@@ -26,7 +28,13 @@ from claude_code_local_proxy.config import (
     DEFAULT_UPSTREAM_BASE_URL,
     DEFAULT_UPSTREAM_TIMEOUT_SECONDS,
 )
-from claude_code_local_proxy.egress_guard import EgressGuard, EgressGuardConfig, parse_country_codes
+from claude_code_local_proxy.egress_guard import (
+    EgressGuard,
+    EgressGuardConfig,
+    normalize_public_ip,
+    parse_country_codes,
+    parse_egress_guard_mode,
+)
 from claude_code_local_proxy.proxy import ProxyConfig, run_server
 from claude_code_local_proxy.sanitizer import Mode
 
@@ -108,6 +116,25 @@ def _build_parser() -> argparse.ArgumentParser:
             _parse_bool,
         ),
         help="Check egress IP location before forwarding. Defaults to EGRESS_GUARD_ENABLED or enabled.",
+    )
+    parser.add_argument(
+        "--egress-guard-mode",
+        choices=("country-code", "fixed-ip"),
+        default=_env_value(
+            "EGRESS_GUARD_MODE",
+            DEFAULT_EGRESS_GUARD_MODE,
+            parse_egress_guard_mode,
+        ),
+        help="Egress guard mode. country-code blocks configured regions; fixed-ip blocks when public IP changes.",
+    )
+    parser.add_argument(
+        "--egress-guard-fixed-ip",
+        default=_env_value(
+            "EGRESS_GUARD_FIXED_IP",
+            DEFAULT_EGRESS_GUARD_FIXED_IP,
+            normalize_public_ip,
+        ),
+        help="Fixed public IP allowed in fixed-ip mode. Required when EGRESS_GUARD_MODE=fixed-ip.",
     )
     parser.add_argument(
         "--egress-guard-blocked-country-codes",
@@ -214,6 +241,8 @@ def _build_egress_guard(args: argparse.Namespace) -> EgressGuard | None:
         return None
     try:
         config = EgressGuardConfig(
+            mode=args.egress_guard_mode,
+            fixed_ip=args.egress_guard_fixed_ip,
             blocked_country_codes=parse_country_codes(args.egress_guard_blocked_country_codes),
             provider_timeout_seconds=args.egress_guard_provider_timeout_seconds,
             public_ip_cache_seconds=args.egress_guard_public_ip_cache_seconds,

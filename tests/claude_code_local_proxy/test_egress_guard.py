@@ -13,9 +13,12 @@ from claude_code_local_proxy.egress_guard import (
     EgressGuard,
     EgressGuardBlocked,
     EgressGuardConfig,
+    EgressGuardIpChanged,
     EgressGuardUnavailable,
     EgressLocation,
+    normalize_public_ip,
     parse_country_codes,
+    parse_egress_guard_mode,
 )
 
 
@@ -45,6 +48,16 @@ def test_parse_country_codes_rejects_invalid_codes() -> None:
         parse_country_codes("CN CHN")
 
 
+def test_parse_egress_guard_mode_rejects_invalid_mode() -> None:
+    with pytest.raises(ValueError, match="country-code, fixed-ip"):
+        parse_egress_guard_mode("region")
+
+
+def test_normalize_public_ip_rejects_invalid_ip() -> None:
+    with pytest.raises(ValueError):
+        normalize_public_ip("not-an-ip")
+
+
 def test_egress_guard_blocks_blocked_country_code() -> None:
     guard = EgressGuard(
         EgressGuardConfig(blocked_country_codes=frozenset({"CN"})),
@@ -58,6 +71,52 @@ def test_egress_guard_blocks_blocked_country_code() -> None:
 
     assert exc_info.value.location.country_code == "CN"
     assert exc_info.value.location.ip == "203.0.113.10"
+
+
+def test_egress_guard_blocks_changed_fixed_ip() -> None:
+    guard = EgressGuard(
+        EgressGuardConfig(
+            mode="fixed-ip",
+            fixed_ip="198.51.100.10",
+            blocked_country_codes=frozenset({"CN"}),
+        ),
+        urlopen=_urlopen_sequence("203.0.113.10"),
+    )
+
+    with pytest.raises(EgressGuardIpChanged) as exc_info:
+        guard.ensure_allowed()
+
+    assert exc_info.value.expected_ip == "198.51.100.10"
+    assert exc_info.value.current_ip == "203.0.113.10"
+
+
+def test_egress_guard_requires_fixed_ip_in_fixed_ip_mode() -> None:
+    with pytest.raises(ValueError, match="fixed_ip is required"):
+        EgressGuardConfig(mode="fixed-ip", blocked_country_codes=frozenset({"CN"}))
+
+
+def test_egress_guard_skips_geo_lookup_in_fixed_ip_mode() -> None:
+    calls = 0
+
+    def urlopen(*args: object, **kwargs: object) -> FakeResponse:
+        nonlocal calls
+        calls += 1
+        return FakeResponse("198.51.100.10")
+
+    guard = EgressGuard(
+        EgressGuardConfig(
+            mode="fixed-ip",
+            fixed_ip="198.51.100.10",
+            blocked_country_codes=frozenset({"CN"}),
+        ),
+        urlopen=urlopen,
+    )
+
+    location = guard.ensure_allowed()
+
+    assert location is not None
+    assert location.ip == "198.51.100.10"
+    assert calls == 1
 
 
 def test_egress_guard_allows_non_blocked_country_code() -> None:
