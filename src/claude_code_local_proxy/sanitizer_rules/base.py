@@ -13,13 +13,14 @@ class SanitizeStats:
     """Summary of marker observations made while walking a JSON payload."""
 
     date_lines: int = 0
+    timezone_markers: int = 0
     apostrophe_variants: int = 0
     slash_dates: int = 0
     replacements: int = 0
 
     @property
     def observed(self) -> bool:
-        return self.date_lines > 0
+        return self.date_lines > 0 or self.timezone_markers > 0
 
     @property
     def changed(self) -> bool:
@@ -28,6 +29,7 @@ class SanitizeStats:
     def __add__(self, other: SanitizeStats) -> SanitizeStats:
         return SanitizeStats(
             date_lines=self.date_lines + other.date_lines,
+            timezone_markers=self.timezone_markers + other.timezone_markers,
             apostrophe_variants=self.apostrophe_variants + other.apostrophe_variants,
             slash_dates=self.slash_dates + other.slash_dates,
             replacements=self.replacements + other.replacements,

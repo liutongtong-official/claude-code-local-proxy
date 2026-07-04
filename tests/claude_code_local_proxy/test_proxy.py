@@ -72,7 +72,10 @@ def test_proxy_normalizes_json_body_before_forwarding() -> None:
     upstream_url = f"http://127.0.0.1:{upstream.server_port}"
 
     SanitizingProxyHandler.config = ProxyConfig(
-        upstream_base_url=upstream_url, timeout_seconds=5, mode="normalize"
+        upstream_base_url=upstream_url,
+        timeout_seconds=5,
+        mode="normalize",
+        sanitizer_rules=("date-marker",),
     )
     proxy = ThreadingHTTPServer(("127.0.0.1", 0), SanitizingProxyHandler)
     proxy_thread = threading.Thread(target=proxy.serve_forever, daemon=True)
@@ -94,6 +97,50 @@ def test_proxy_normalizes_json_body_before_forwarding() -> None:
             assert response.read() == b'{"ok":true}'
 
         assert json.loads(CaptureHandler.captured_body) == {"system": "Today's date is 2026-06-30."}
+        assert CaptureHandler.request_count == 1
+    finally:
+        proxy.shutdown()
+        upstream.shutdown()
+        proxy.server_close()
+        upstream.server_close()
+
+
+def test_proxy_normalizes_configured_timezone_before_forwarding() -> None:
+    upstream = HTTPServer(("127.0.0.1", 0), CaptureHandler)
+    CaptureHandler.request_count = 0
+    upstream_thread = threading.Thread(target=upstream.serve_forever, daemon=True)
+    upstream_thread.start()
+    upstream_url = f"http://127.0.0.1:{upstream.server_port}"
+
+    SanitizingProxyHandler.config = ProxyConfig(
+        upstream_base_url=upstream_url,
+        timeout_seconds=5,
+        mode="normalize",
+        sanitizer_rules=("timezone-marker",),
+        sanitizer_timezone="America/Los_Angeles",
+    )
+    proxy = ThreadingHTTPServer(("127.0.0.1", 0), SanitizingProxyHandler)
+    proxy_thread = threading.Thread(target=proxy.serve_forever, daemon=True)
+    proxy_thread.start()
+
+    try:
+        payload = json.dumps(
+            {"system": "<timezone>Asia/Shanghai</timezone>"},
+            ensure_ascii=False,
+        ).encode()
+        request = urllib.request.Request(
+            f"http://127.0.0.1:{proxy.server_address[1]}/v1/messages",
+            data=payload,
+            headers={"content-type": "application/json"},
+            method="POST",
+        )
+
+        with urllib.request.urlopen(request, timeout=5) as response:
+            assert response.read() == b'{"ok":true}'
+
+        assert json.loads(CaptureHandler.captured_body) == {
+            "system": "<timezone>America/Los_Angeles</timezone>"
+        }
         assert CaptureHandler.request_count == 1
     finally:
         proxy.shutdown()
@@ -253,6 +300,7 @@ def test_proxy_strips_query_from_marker_logs(caplog: pytest.LogCaptureFixture) -
         upstream_base_url=upstream_url,
         timeout_seconds=5,
         mode="observe",
+        sanitizer_rules=("date-marker",),
     )
     proxy = ThreadingHTTPServer(("127.0.0.1", 0), SanitizingProxyHandler)
     proxy_thread = threading.Thread(target=proxy.serve_forever, daemon=True)

@@ -12,6 +12,8 @@ DEFAULT_LOG_LEVEL = "INFO"
 
 # Request sanitizer defaults.
 DEFAULT_SANITIZER_MODE: Mode = "normalize"
+DEFAULT_SANITIZER_RULES: tuple[str, ...] = ()
+DEFAULT_SANITIZER_TIMEZONE: str | None = None
 
 # Upstream API defaults.
 DEFAULT_UPSTREAM_BASE_URL = "https://api.anthropic.com"

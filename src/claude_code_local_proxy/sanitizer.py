@@ -3,12 +3,37 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from functools import lru_cache
 from typing import Any
 
 from claude_code_local_proxy.sanitizer_rules.base import Mode, SanitizerRule, SanitizeStats
 from claude_code_local_proxy.sanitizer_rules.date_marker import DateMarkerRule, apostrophe_label
+from claude_code_local_proxy.sanitizer_rules.timezone_marker import TimezoneMarkerRule
 
-DEFAULT_RULES: tuple[SanitizerRule, ...] = (DateMarkerRule(),)
+DATE_MARKER_RULE = "date-marker"
+TIMEZONE_MARKER_RULE = "timezone-marker"
+SUPPORTED_RULE_NAMES = (DATE_MARKER_RULE, TIMEZONE_MARKER_RULE)
+DEFAULT_RULES: tuple[SanitizerRule, ...] = ()
+
+
+@lru_cache(maxsize=16)
+def default_rules(
+    enabled_rule_names: tuple[str, ...] = (),
+    target_timezone: str | None = None,
+) -> tuple[SanitizerRule, ...]:
+    """Return built-in sanitizer rules for the current runtime configuration."""
+
+    rules: list[SanitizerRule] = []
+    for name in enabled_rule_names:
+        if name == DATE_MARKER_RULE:
+            rules.append(DateMarkerRule())
+        elif name == TIMEZONE_MARKER_RULE:
+            if target_timezone is None:
+                raise ValueError("timezone-marker requires target_timezone")
+            rules.append(TimezoneMarkerRule(target_timezone))
+        else:
+            raise ValueError(f"unknown sanitizer rule {name!r}")
+    return tuple(rules)
 
 
 def sanitize_text(
@@ -62,11 +87,16 @@ def sanitize_json_value(
 
 __all__ = [
     "DEFAULT_RULES",
+    "DATE_MARKER_RULE",
     "DateMarkerRule",
     "Mode",
     "SanitizeStats",
     "SanitizerRule",
+    "SUPPORTED_RULE_NAMES",
+    "TIMEZONE_MARKER_RULE",
+    "TimezoneMarkerRule",
     "apostrophe_label",
+    "default_rules",
     "sanitize_json_value",
     "sanitize_text",
 ]
