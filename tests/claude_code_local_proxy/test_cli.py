@@ -6,9 +6,11 @@ import subprocess
 from collections.abc import Iterator
 from logging.handlers import TimedRotatingFileHandler
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
+from claude_code_local_proxy import cli
 from claude_code_local_proxy.cli import main
 from claude_code_local_proxy.config import DEFAULT_UPSTREAM_BASE_URL
 from claude_code_local_proxy.egress_guard import EgressGuard
@@ -358,3 +360,31 @@ def test_cli_rejects_invalid_egress_guard_float_env(monkeypatch: pytest.MonkeyPa
 
     with pytest.raises(SystemExit, match="EGRESS_GUARD_PROVIDER_TIMEOUT_SECONDS is invalid"):
         main(["--listen-port", "0"])
+
+
+def test_load_env_skips_dotenv_under_pytest() -> None:
+    # PYTEST_VERSION is set for the whole run, so _load_env must short-circuit
+    # before touching any dotenv file — a developer's real .env secrets never
+    # leak into test runs and make them hit external services.
+    with (
+        patch.object(cli, "find_dotenv") as find,
+        patch.object(cli, "load_dotenv") as load,
+    ):
+        cli._load_env()
+
+    find.assert_not_called()
+    load.assert_not_called()
+
+
+def test_load_env_loads_dotenv_outside_pytest(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Outside pytest, both files are probed in precedence order (most-specific
+    # first) and loaded when found (find_dotenv's default mock return is truthy).
+    monkeypatch.delenv("PYTEST_VERSION", raising=False)
+    with (
+        patch.object(cli, "find_dotenv") as find,
+        patch.object(cli, "load_dotenv") as load,
+    ):
+        cli._load_env()
+
+    assert [call.args[0] for call in find.call_args_list] == [".env.local", ".env"]
+    assert load.call_count == 2
