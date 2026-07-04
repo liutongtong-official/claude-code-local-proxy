@@ -172,7 +172,7 @@ SANITIZER_RULES=timezone-marker SANITIZER_TIMEZONE=America/Los_Angeles uv run cl
 > }
 > ```
 >
-> The shim directory can live anywhere in your shell setup. Override only the commands Claude Code commonly uses for timezone probes, such as `date`, `readlink`, and `stat`, and forward every unrelated invocation to the real system command. This covers ordinary command lookups; it does not intercept absolute paths such as `/bin/date` or programs that call OS timezone APIs directly.
+> The shim directory can live anywhere in your shell setup. Override only the commands Claude Code commonly uses for timezone probes, such as `date`, `readlink`, and `stat`, and forward every unrelated invocation to the real system command. Use an absolute path or temporarily remove the shim directory from `PATH` before forwarding, so the shim does not recursively call itself. This covers ordinary command lookups; it does not intercept absolute paths such as `/bin/date` or programs that call OS timezone APIs directly.
 
 Start the proxy in the background:
 
