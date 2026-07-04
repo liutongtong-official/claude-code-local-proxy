@@ -161,13 +161,18 @@ SANITIZER_RULES=timezone-marker SANITIZER_TIMEZONE=America/Los_Angeles uv run cl
 > TZ=America/Los_Angeles ANTHROPIC_BASE_URL=http://127.0.0.1:8787 claude
 > ```
 >
-> For repeated use, add a shell function to your shell config:
+> Some timezone checks inspect system-level commands instead of the process timezone. For example, `date` observes `TZ`, but `readlink /etc/localtime` and some `stat /etc/localtime` checks report the system timezone. If you need Claude Code's shell checks to consistently report the target timezone, put small command shims ahead of the normal `PATH` and limit that override to the Claude Code wrapper:
 >
 > ```bash
-> claude-la() {
->   TZ=America/Los_Angeles ANTHROPIC_BASE_URL=http://127.0.0.1:8787 claude "$@"
+> claude-with-local-proxy() {
+>   TZ=America/Los_Angeles \
+>     ANTHROPIC_BASE_URL=http://127.0.0.1:8787 \
+>     PATH="$HOME/.local/claude-code-shims:$PATH" \
+>     claude "$@"
 > }
 > ```
+>
+> The shim directory can live anywhere in your shell setup. Override only the commands Claude Code commonly uses for timezone probes, such as `date`, `readlink`, and `stat`, and forward every unrelated invocation to the real system command. Use an absolute path or temporarily remove the shim directory from `PATH` before forwarding, so the shim does not recursively call itself. This covers ordinary command lookups; it does not intercept absolute paths such as `/bin/date` or programs that call OS timezone APIs directly.
 
 Start the proxy in the background:
 
