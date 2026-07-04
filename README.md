@@ -62,9 +62,11 @@ By default, the egress guard checks the proxy process's current public IP before
 
 The guard uses public IP and geolocation providers without sending prompts, request bodies, response bodies, or credentials to those providers. When the current public IP needs to be refreshed, it sends one request to identify it, then uses a local `public_ip -> country_code` cache to avoid repeated GeoIP lookups for the same IP.
 
+Set `EGRESS_GUARD_MODE=fixed-ip` to block when the proxy process's public IP changes. `EGRESS_GUARD_FIXED_IP` is required in this mode; with `EGRESS_GUARD_FIXED_IP=203.0.113.10`, only that public IP is allowed.
+
 For safety, the default is fail-closed: if all location providers are unreachable, the proxy returns `503` instead of forwarding the request. Set `EGRESS_GUARD_FAIL_CLOSED=false` only if availability is more important than leak prevention.
 
-By default `EGRESS_GUARD_IP_REGION_CACHE_SECONDS=86400`, so the country code for a previously seen public IP is reused for one day. `EGRESS_GUARD_PUBLIC_IP_CACHE_SECONDS=0` keeps the current public IP cache disabled by default, so a VPN route change is detected before the next Claude Code request is forwarded. Set it to a short value such as `5` or `30` only when you want to reduce public IP provider calls during request bursts and accept that route changes may be detected after that TTL expires.
+By default `EGRESS_GUARD_IP_REGION_CACHE_SECONDS=86400`, so the country code for a previously seen public IP is reused for one day. `EGRESS_GUARD_PUBLIC_IP_CACHE_SECONDS=0` keeps the current public IP cache disabled by default, so a VPN route change is detected before the next Claude Code request is forwarded. Keep that default for `fixed-ip` mode when immediate IP-change detection matters. Set it to a short value such as `5` or `30` only when you want to reduce public IP provider calls during request bursts and accept that route changes may be detected after that TTL expires.
 
 ## Install
 

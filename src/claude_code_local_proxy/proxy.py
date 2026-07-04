@@ -16,6 +16,7 @@ from typing import Any, ClassVar
 from claude_code_local_proxy.egress_guard import (
     EgressChecker,
     EgressGuardBlocked,
+    EgressGuardIpChanged,
     EgressGuardUnavailable,
 )
 from claude_code_local_proxy.sanitizer import Mode, SanitizeStats, sanitize_json_value
@@ -138,6 +139,16 @@ class SanitizingProxyHandler(BaseHTTPRequestHandler):
                 location.country_code,
                 location.provider,
                 location.ip or "?",
+            )
+            self.close_connection = True
+            self._send_json_error(HTTPStatus.UNAVAILABLE_FOR_LEGAL_REASONS, str(exc))
+            return False
+        except EgressGuardIpChanged as exc:
+            LOGGER.warning(
+                "egress fixed IP changed path=%s expected_ip=%s current_ip=%s",
+                self._safe_log_path(),
+                exc.expected_ip,
+                exc.current_ip,
             )
             self.close_connection = True
             self._send_json_error(HTTPStatus.UNAVAILABLE_FOR_LEGAL_REASONS, str(exc))

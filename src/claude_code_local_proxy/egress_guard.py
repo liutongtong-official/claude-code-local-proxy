@@ -12,17 +12,20 @@ import urllib.parse
 import urllib.request
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Protocol
+from typing import Any, Literal, Protocol, cast
 
 from claude_code_local_proxy.config import (
     DEFAULT_EGRESS_GUARD_BLOCKED_COUNTRY_CODES,
     DEFAULT_EGRESS_GUARD_FAIL_CLOSED,
+    DEFAULT_EGRESS_GUARD_FIXED_IP,
     DEFAULT_EGRESS_GUARD_IP_REGION_CACHE_SECONDS,
+    DEFAULT_EGRESS_GUARD_MODE,
     DEFAULT_EGRESS_GUARD_PROVIDER_TIMEOUT_SECONDS,
     DEFAULT_EGRESS_GUARD_PUBLIC_IP_CACHE_SECONDS,
 )
 
 LOGGER = logging.getLogger(__name__)
+EgressGuardMode = Literal["country-code", "fixed-ip"]
 _COUNTRY_CODE_RE = re.compile(r"^[A-Z]{2}$")
 _MAX_GEO_RESPONSE_BYTES = 64 * 1024
 _MAX_IP_RESPONSE_BYTES = 1024
@@ -58,6 +61,8 @@ class GeoProvider:
 
 @dataclass(frozen=True)
 class EgressGuardConfig:
+    mode: EgressGuardMode = cast(EgressGuardMode, DEFAULT_EGRESS_GUARD_MODE)
+    fixed_ip: str | None = DEFAULT_EGRESS_GUARD_FIXED_IP
     blocked_country_codes: frozenset[str] = field(
         default_factory=lambda: parse_country_codes(DEFAULT_EGRESS_GUARD_BLOCKED_COUNTRY_CODES)
     )
@@ -67,6 +72,13 @@ class EgressGuardConfig:
     fail_closed: bool = DEFAULT_EGRESS_GUARD_FAIL_CLOSED
 
     def __post_init__(self) -> None:
+        if self.mode not in {"country-code", "fixed-ip"}:
+            raise ValueError("mode must be one of: country-code, fixed-ip")
+        if self.mode == "fixed-ip" and self.fixed_ip is None:
+            raise ValueError("fixed_ip is required when mode is fixed-ip")
+        if self.fixed_ip is not None:
+            normalized_ip = normalize_public_ip(self.fixed_ip)
+            object.__setattr__(self, "fixed_ip", normalized_ip)
         if self.provider_timeout_seconds <= 0:
             raise ValueError("provider_timeout_seconds must be positive")
         if self.public_ip_cache_seconds < 0:
@@ -83,6 +95,17 @@ class EgressGuardBlocked(Exception):
         super().__init__(
             "egress IP is in a blocked region: "
             f"country_code={location.country_code} provider={location.provider} ip={location.ip}"
+        )
+
+
+class EgressGuardIpChanged(Exception):
+    """Raised when the current egress IP no longer matches the fixed IP policy."""
+
+    def __init__(self, expected_ip: str, current_ip: str) -> None:
+        self.expected_ip = expected_ip
+        self.current_ip = current_ip
+        super().__init__(
+            f"egress IP changed from fixed value: expected_ip={expected_ip} current_ip={current_ip}"
         )
 
 
@@ -134,6 +157,9 @@ class EgressGuard:
         if ip is None:
             return self._handle_unavailable(tuple(ip_errors))
 
+        if self._config.mode == "fixed-ip":
+            return self._ensure_fixed_ip_allowed(ip)
+
         location = self._cached_location(ip)
         if location is None:
             location, geo_errors = self._lookup_location(ip)
@@ -144,6 +170,14 @@ class EgressGuard:
         if location.country_code in self._config.blocked_country_codes:
             raise EgressGuardBlocked(location)
         return location
+
+    def _ensure_fixed_ip_allowed(self, ip: str) -> EgressLocation:
+        fixed_ip = self._config.fixed_ip
+        if fixed_ip is None:  # pragma: no cover - rejected by EgressGuardConfig.
+            raise EgressGuardUnavailable(("fixed-ip mode requires fixed_ip",))
+        if ip != fixed_ip:
+            raise EgressGuardIpChanged(expected_ip=fixed_ip, current_ip=ip)
+        return EgressLocation(provider="fixed-ip", country_code="UNKNOWN", ip=ip)
 
     def _current_public_ip(self) -> tuple[str | None, list[str]]:
         if self._config.public_ip_cache_seconds <= 0:
@@ -285,6 +319,17 @@ def parse_country_codes(value: str) -> frozenset[str]:
     if not codes:
         raise ValueError("at least one blocked country code is required")
     return codes
+
+
+def parse_egress_guard_mode(value: str) -> EgressGuardMode:
+    normalized = value.strip().lower()
+    if normalized not in {"country-code", "fixed-ip"}:
+        raise ValueError("expected one of: country-code, fixed-ip")
+    return cast(EgressGuardMode, normalized)
+
+
+def normalize_public_ip(value: str) -> str:
+    return str(ipaddress.ip_address(value.strip()))
 
 
 def _parse_ipwho(payload: dict[str, Any], queried_ip: str) -> EgressLocation | None:

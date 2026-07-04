@@ -11,6 +11,7 @@ import pytest
 
 from claude_code_local_proxy.cli import main
 from claude_code_local_proxy.config import DEFAULT_UPSTREAM_BASE_URL
+from claude_code_local_proxy.egress_guard import EgressGuard
 from claude_code_local_proxy.proxy import ProxyConfig
 
 _CLI_ENV_KEYS = (
@@ -20,6 +21,8 @@ _CLI_ENV_KEYS = (
     "UPSTREAM_TIMEOUT_SECONDS",
     "SANITIZER_MODE",
     "EGRESS_GUARD_ENABLED",
+    "EGRESS_GUARD_MODE",
+    "EGRESS_GUARD_FIXED_IP",
     "EGRESS_GUARD_BLOCKED_COUNTRY_CODES",
     "EGRESS_GUARD_FAIL_CLOSED",
     "EGRESS_GUARD_PROVIDER_TIMEOUT_SECONDS",
@@ -110,6 +113,48 @@ def test_cli_can_disable_egress_guard(monkeypatch: pytest.MonkeyPatch) -> None:
     config = captured["config"]
     assert isinstance(config, ProxyConfig)
     assert config.egress_guard is None
+
+
+def test_cli_accepts_fixed_ip_egress_guard_mode(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_run_server(host: str, port: int, config: object) -> None:
+        captured["config"] = config
+
+    _clear_cli_env(monkeypatch)
+    monkeypatch.setattr("claude_code_local_proxy.cli.run_server", fake_run_server)
+
+    main(
+        [
+            "--listen-port",
+            "0",
+            "--egress-guard-mode",
+            "fixed-ip",
+            "--egress-guard-fixed-ip",
+            "198.51.100.10",
+        ]
+    )
+
+    config = captured["config"]
+    assert isinstance(config, ProxyConfig)
+    assert isinstance(config.egress_guard, EgressGuard)
+    assert config.egress_guard._config.mode == "fixed-ip"
+    assert config.egress_guard._config.fixed_ip == "198.51.100.10"
+
+
+def test_cli_rejects_fixed_ip_mode_without_fixed_ip(monkeypatch: pytest.MonkeyPatch) -> None:
+    _clear_cli_env(monkeypatch)
+
+    with pytest.raises(SystemExit, match="egress guard configuration is invalid"):
+        main(["--listen-port", "0", "--egress-guard-mode", "fixed-ip"])
+
+
+def test_cli_rejects_invalid_egress_guard_fixed_ip(monkeypatch: pytest.MonkeyPatch) -> None:
+    _clear_cli_env(monkeypatch)
+    monkeypatch.setenv("EGRESS_GUARD_FIXED_IP", "not-an-ip")
+
+    with pytest.raises(SystemExit, match="EGRESS_GUARD_FIXED_IP is invalid"):
+        main(["--listen-port", "0"])
 
 
 def test_cli_can_write_logs_to_file(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
