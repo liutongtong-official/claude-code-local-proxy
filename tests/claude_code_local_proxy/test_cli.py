@@ -20,6 +20,7 @@ _CLI_ENV_KEYS = (
     "UPSTREAM_BASE_URL",
     "UPSTREAM_TIMEOUT_SECONDS",
     "SANITIZER_MODE",
+    "SANITIZER_PUBLIC_BASE_URL",
     "SANITIZER_RULES",
     "SANITIZER_TIMEZONE",
     "EGRESS_GUARD_ENABLED",
@@ -89,7 +90,7 @@ def test_cli_uses_official_anthropic_upstream_by_default(monkeypatch: pytest.Mon
     assert isinstance(config, ProxyConfig)
     assert config.upstream_base_url == DEFAULT_UPSTREAM_BASE_URL
     assert config.sanitizer_rules == ()
-    assert config.egress_guard is not None
+    assert config.egress_guard is None
     assert captured["host"] == "127.0.0.1"
     assert captured["port"] == 0
 
@@ -143,6 +144,33 @@ def test_cli_accepts_sanitizer_rules(monkeypatch: pytest.MonkeyPatch) -> None:
     assert config.sanitizer_rules == ("date-marker", "timezone-marker")
 
 
+def test_cli_configures_base_url_sanitizer(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_run_server(host: str, port: int, config: object) -> None:
+        captured["config"] = config
+
+    _clear_cli_env(monkeypatch)
+    monkeypatch.setattr("claude_code_local_proxy.cli.run_server", fake_run_server)
+
+    main(
+        [
+            "--listen-port",
+            "8787",
+            "--sanitizer-rules",
+            "base-url",
+            "--sanitizer-public-base-url",
+            "https://api.anthropic.com/",
+        ]
+    )
+
+    config = captured["config"]
+    assert isinstance(config, ProxyConfig)
+    assert config.sanitizer_rules == ("base-url",)
+    assert config.sanitizer_public_base_url == "https://api.anthropic.com"
+    assert config.sanitizer_local_base_urls == ("http://127.0.0.1:8787", "http://localhost:8787")
+
+
 def test_cli_rejects_unknown_sanitizer_rule(monkeypatch: pytest.MonkeyPatch) -> None:
     _clear_cli_env(monkeypatch)
     monkeypatch.setenv("SANITIZER_RULES", "date-marker,unknown")
@@ -173,7 +201,7 @@ def test_cli_rejects_invalid_sanitizer_timezone_arg(monkeypatch: pytest.MonkeyPa
         main(["--listen-port", "0", "--sanitizer-timezone", "Mars/Olympus"])
 
 
-def test_cli_can_disable_egress_guard(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_cli_can_enable_egress_guard(monkeypatch: pytest.MonkeyPatch) -> None:
     captured: dict[str, object] = {}
 
     def fake_run_server(host: str, port: int, config: object) -> None:
@@ -182,11 +210,11 @@ def test_cli_can_disable_egress_guard(monkeypatch: pytest.MonkeyPatch) -> None:
     _clear_cli_env(monkeypatch)
     monkeypatch.setattr("claude_code_local_proxy.cli.run_server", fake_run_server)
 
-    main(["--listen-port", "0", "--no-egress-guard-enabled"])
+    main(["--listen-port", "0", "--egress-guard-enabled"])
 
     config = captured["config"]
     assert isinstance(config, ProxyConfig)
-    assert config.egress_guard is None
+    assert isinstance(config.egress_guard, EgressGuard)
 
 
 def test_cli_accepts_fixed_ip_egress_guard_mode(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -202,6 +230,7 @@ def test_cli_accepts_fixed_ip_egress_guard_mode(monkeypatch: pytest.MonkeyPatch)
         [
             "--listen-port",
             "0",
+            "--egress-guard-enabled",
             "--egress-guard-mode",
             "fixed-ip",
             "--egress-guard-fixed-ip",
@@ -220,7 +249,7 @@ def test_cli_rejects_fixed_ip_mode_without_fixed_ip(monkeypatch: pytest.MonkeyPa
     _clear_cli_env(monkeypatch)
 
     with pytest.raises(SystemExit, match="egress guard configuration is invalid"):
-        main(["--listen-port", "0", "--egress-guard-mode", "fixed-ip"])
+        main(["--listen-port", "0", "--egress-guard-enabled", "--egress-guard-mode", "fixed-ip"])
 
 
 def test_cli_rejects_invalid_egress_guard_fixed_ip(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -312,7 +341,15 @@ def test_cli_rejects_invalid_egress_guard_country_code(monkeypatch: pytest.Monke
     _clear_cli_env(monkeypatch)
 
     with pytest.raises(SystemExit, match="egress guard configuration is invalid"):
-        main(["--listen-port", "0", "--egress-guard-blocked-country-codes", "CHN"])
+        main(
+            [
+                "--listen-port",
+                "0",
+                "--egress-guard-enabled",
+                "--egress-guard-blocked-country-codes",
+                "CHN",
+            ]
+        )
 
 
 def test_cli_rejects_invalid_egress_guard_float_env(monkeypatch: pytest.MonkeyPatch) -> None:

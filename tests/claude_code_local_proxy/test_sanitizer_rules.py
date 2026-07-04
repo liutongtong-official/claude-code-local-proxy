@@ -1,11 +1,28 @@
 """Tests for individual sanitizer rules."""
 
+import pytest
+
+from claude_code_local_proxy.sanitizer_rules.base_url import BaseUrlRule
 from claude_code_local_proxy.sanitizer_rules.date_marker import DateMarkerRule, apostrophe_label
 from claude_code_local_proxy.sanitizer_rules.timezone_marker import TimezoneMarkerRule
 
 
 def test_date_marker_rule_exposes_name() -> None:
     assert DateMarkerRule().name == "date_marker"
+
+
+def test_base_url_rule_exposes_name() -> None:
+    assert BaseUrlRule(("http://127.0.0.1:8787",), "https://api.anthropic.com").name == "base_url"
+
+
+def test_base_url_rule_rejects_empty_public_base_url() -> None:
+    with pytest.raises(ValueError, match="public_base_url"):
+        BaseUrlRule(("http://127.0.0.1:8787",), "/")
+
+
+def test_base_url_rule_rejects_empty_local_base_urls() -> None:
+    with pytest.raises(ValueError, match="local_base_urls"):
+        BaseUrlRule(("", "/"), "https://api.anthropic.com")
 
 
 def test_timezone_marker_rule_exposes_name() -> None:

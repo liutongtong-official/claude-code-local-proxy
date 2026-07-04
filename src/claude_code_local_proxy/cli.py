@@ -26,6 +26,7 @@ from claude_code_local_proxy.config import (
     DEFAULT_LOG_FILE,
     DEFAULT_LOG_LEVEL,
     DEFAULT_SANITIZER_MODE,
+    DEFAULT_SANITIZER_PUBLIC_BASE_URL,
     DEFAULT_SANITIZER_RULES,
     DEFAULT_SANITIZER_TIMEZONE,
     DEFAULT_UPSTREAM_BASE_URL,
@@ -39,7 +40,12 @@ from claude_code_local_proxy.egress_guard import (
     parse_egress_guard_mode,
 )
 from claude_code_local_proxy.proxy import ProxyConfig, run_server
-from claude_code_local_proxy.sanitizer import SUPPORTED_RULE_NAMES, TIMEZONE_MARKER_RULE, Mode
+from claude_code_local_proxy.sanitizer import (
+    BASE_URL_RULE,
+    SUPPORTED_RULE_NAMES,
+    TIMEZONE_MARKER_RULE,
+    Mode,
+)
 
 _MODES: tuple[Mode, ...] = ("off", "observe", "normalize")
 _LOG_RETENTION_DAYS = 7
@@ -60,6 +66,13 @@ def _parse_timezone(value: str) -> str:
         ZoneInfo(normalized)
     except ZoneInfoNotFoundError as exc:
         raise ValueError(f"unknown IANA timezone {normalized!r}") from exc
+    return normalized
+
+
+def _parse_base_url(value: str) -> str:
+    normalized = value.strip().rstrip("/")
+    if not normalized:
+        raise ValueError("base URL must not be empty")
     return normalized
 
 
@@ -95,8 +108,9 @@ def _env_value[T](name: str, default: T, parser: Callable[[str], T]) -> T:
 
 def _load_env() -> None:
     # Precedence (highest → lowest): real env > .env.local > .env.
-    if "PYTEST_VERSION" not in os.environ:
-        load_dotenv(find_dotenv(".env.local", usecwd=True), override=False)
+    if "PYTEST_VERSION" in os.environ:
+        return
+    load_dotenv(find_dotenv(".env.local", usecwd=True), override=False)
     load_dotenv(find_dotenv(".env", usecwd=True), override=False)
 
 
@@ -147,6 +161,16 @@ def _build_parser() -> argparse.ArgumentParser:
         help="IANA timezone used to normalize Claude Code timezone markers. Defaults to SANITIZER_TIMEZONE or disabled.",
     )
     parser.add_argument(
+        "--sanitizer-public-base-url",
+        type=_parse_base_url,
+        default=_env_value(
+            "SANITIZER_PUBLIC_BASE_URL",
+            DEFAULT_SANITIZER_PUBLIC_BASE_URL,
+            _parse_base_url,
+        ),
+        help="Public base URL used by the base-url sanitizer. Defaults to SANITIZER_PUBLIC_BASE_URL or the upstream base URL.",
+    )
+    parser.add_argument(
         "--timeout-seconds",
         type=float,
         default=float(os.getenv("UPSTREAM_TIMEOUT_SECONDS", str(DEFAULT_UPSTREAM_TIMEOUT_SECONDS))),
@@ -160,7 +184,7 @@ def _build_parser() -> argparse.ArgumentParser:
             DEFAULT_EGRESS_GUARD_ENABLED,
             _parse_bool,
         ),
-        help="Check egress IP location before forwarding. Defaults to EGRESS_GUARD_ENABLED or enabled.",
+        help="Check egress IP location before forwarding. Defaults to EGRESS_GUARD_ENABLED or disabled.",
     )
     parser.add_argument(
         "--egress-guard-mode",
@@ -253,6 +277,8 @@ def main(argv: list[str] | None = None) -> None:
         mode=args.sanitizer_mode,
         sanitizer_rules=args.sanitizer_rules,
         sanitizer_timezone=args.sanitizer_timezone,
+        sanitizer_public_base_url=args.sanitizer_public_base_url or args.upstream_base_url,
+        sanitizer_local_base_urls=_local_base_urls(args.listen_host, args.listen_port),
         timeout_seconds=args.timeout_seconds,
         egress_guard=_build_egress_guard(args),
     )
@@ -287,6 +313,25 @@ def _configure_logging(level_name: str, log_file: str | None) -> None:
 def _validate_sanitizer_config(args: argparse.Namespace) -> None:
     if TIMEZONE_MARKER_RULE in args.sanitizer_rules and args.sanitizer_timezone is None:
         raise SystemExit("timezone-marker requires SANITIZER_TIMEZONE or --sanitizer-timezone")
+    if BASE_URL_RULE in args.sanitizer_rules and not (
+        args.sanitizer_public_base_url or args.upstream_base_url
+    ):
+        raise SystemExit(
+            "base-url requires SANITIZER_PUBLIC_BASE_URL or --sanitizer-public-base-url"
+        )
+
+
+def _local_base_urls(host: str, port: int) -> tuple[str, ...]:
+    hosts = [host]
+    if host in {"127.0.0.1", "localhost", "0.0.0.0"}:
+        hosts.extend(["127.0.0.1", "localhost"])
+
+    urls: list[str] = []
+    for candidate in hosts:
+        url = f"http://{candidate}:{port}"
+        if url not in urls:
+            urls.append(url)
+    return tuple(urls)
 
 
 def _build_egress_guard(args: argparse.Namespace) -> EgressGuard | None:

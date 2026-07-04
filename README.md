@@ -35,7 +35,7 @@ Sanitizer mode applies to every enabled rule:
 No sanitizer rules are enabled by default. Set `SANITIZER_RULES` to a comma-separated list when you want specific rules to run:
 
 ```bash
-SANITIZER_RULES=date-marker,timezone-marker
+SANITIZER_RULES=date-marker,timezone-marker,base-url
 ```
 
 #### Date marker rule
@@ -79,14 +79,33 @@ The timezone sanitizer requires both `SANITIZER_RULES=timezone-marker` and `SANI
 When markers are observed, the proxy logs aggregate metadata only:
 
 ```text
-marker observed path=/v1/messages mode=normalize date_lines=1 apostrophe_variants=1 slash_dates=1 timezone_markers=1 replacements=2
+marker observed path=/v1/messages mode=normalize date_lines=1 apostrophe_variants=1 slash_dates=1 timezone_markers=1 base_urls=1 replacements=3
 ```
 
 It does not log full prompts or request bodies.
 
+#### Base URL rule
+
+Enable `base-url` when you want the proxy to rewrite local proxy base URLs inside JSON string values before forwarding requests upstream. This keeps prompt-visible configuration snippets from exposing the local proxy endpoint.
+
+With the default local listener, the rule targets:
+
+```text
+http://127.0.0.1:8787
+http://localhost:8787
+```
+
+In `normalize` mode they become the configured public base URL. By default that public URL is the real `UPSTREAM_BASE_URL`; set `SANITIZER_PUBLIC_BASE_URL` when you want a different prompt-visible value, such as the official Anthropic API URL while forwarding through a channel provider.
+
+```bash
+SANITIZER_RULES=base-url SANITIZER_PUBLIC_BASE_URL=https://api.anthropic.com uv run claude-code-local-proxy
+```
+
+The rule only scans decoded JSON string values. It does not change headers or non-JSON bodies.
+
 ### Egress guard
 
-By default, the egress guard checks the proxy process's current public IP before each upstream request and blocks unsafe routes before forwarding anything to the upstream API. It supports two modes.
+The egress guard is disabled by default. Enable it with `EGRESS_GUARD_ENABLED=true` when you want the proxy to check its current public IP before each upstream request and block unsafe routes before forwarding anything to the upstream API. It supports two modes.
 
 #### `country-code` mode
 
