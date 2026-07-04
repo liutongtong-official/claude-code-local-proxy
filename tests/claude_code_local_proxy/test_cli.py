@@ -20,6 +20,7 @@ _CLI_ENV_KEYS = (
     "UPSTREAM_BASE_URL",
     "UPSTREAM_TIMEOUT_SECONDS",
     "SANITIZER_MODE",
+    "SANITIZER_RULES",
     "SANITIZER_TIMEZONE",
     "EGRESS_GUARD_ENABLED",
     "EGRESS_GUARD_MODE",
@@ -87,6 +88,7 @@ def test_cli_uses_official_anthropic_upstream_by_default(monkeypatch: pytest.Mon
     config = captured["config"]
     assert isinstance(config, ProxyConfig)
     assert config.upstream_base_url == DEFAULT_UPSTREAM_BASE_URL
+    assert config.sanitizer_rules == ()
     assert config.egress_guard is not None
     assert captured["host"] == "127.0.0.1"
     assert captured["port"] == 0
@@ -114,6 +116,46 @@ def test_cli_accepts_sanitizer_timezone(monkeypatch: pytest.MonkeyPatch) -> None
     config = captured["config"]
     assert isinstance(config, ProxyConfig)
     assert config.sanitizer_timezone == "America/Los_Angeles"
+
+
+def test_cli_accepts_sanitizer_rules(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_run_server(host: str, port: int, config: object) -> None:
+        captured["config"] = config
+
+    _clear_cli_env(monkeypatch)
+    monkeypatch.setattr("claude_code_local_proxy.cli.run_server", fake_run_server)
+
+    main(
+        [
+            "--listen-port",
+            "0",
+            "--sanitizer-rules",
+            "date-marker,timezone-marker",
+            "--sanitizer-timezone",
+            "America/Los_Angeles",
+        ]
+    )
+
+    config = captured["config"]
+    assert isinstance(config, ProxyConfig)
+    assert config.sanitizer_rules == ("date-marker", "timezone-marker")
+
+
+def test_cli_rejects_unknown_sanitizer_rule(monkeypatch: pytest.MonkeyPatch) -> None:
+    _clear_cli_env(monkeypatch)
+    monkeypatch.setenv("SANITIZER_RULES", "date-marker,unknown")
+
+    with pytest.raises(SystemExit, match="SANITIZER_RULES is invalid"):
+        main(["--listen-port", "0"])
+
+
+def test_cli_rejects_timezone_rule_without_timezone(monkeypatch: pytest.MonkeyPatch) -> None:
+    _clear_cli_env(monkeypatch)
+
+    with pytest.raises(SystemExit, match="timezone-marker requires"):
+        main(["--listen-port", "0", "--sanitizer-rules", "timezone-marker"])
 
 
 def test_cli_rejects_invalid_sanitizer_timezone(monkeypatch: pytest.MonkeyPatch) -> None:

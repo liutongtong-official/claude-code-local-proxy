@@ -1,6 +1,8 @@
 """Tests for Claude Code marker sanitizing."""
 
 from claude_code_local_proxy.sanitizer import (
+    DATE_MARKER_RULE,
+    TIMEZONE_MARKER_RULE,
     Mode,
     SanitizeStats,
     default_rules,
@@ -13,7 +15,7 @@ from claude_code_local_proxy.sanitizer_rules.timezone_marker import TimezoneMark
 def test_sanitize_text_normalizes_apostrophe_variant_and_slash_date() -> None:
     text = "Todayʹs date is 2026/06/30."
 
-    sanitized, stats = sanitize_text(text)
+    sanitized, stats = sanitize_text(text, rules=default_rules((DATE_MARKER_RULE,)))
 
     assert sanitized == "Today's date is 2026-06-30."
     assert stats.date_lines == 1
@@ -25,7 +27,7 @@ def test_sanitize_text_normalizes_apostrophe_variant_and_slash_date() -> None:
 def test_sanitize_text_preserves_plain_date_line() -> None:
     text = "Today's date is 2026-06-30."
 
-    sanitized, stats = sanitize_text(text)
+    sanitized, stats = sanitize_text(text, rules=default_rules((DATE_MARKER_RULE,)))
 
     assert sanitized == text
     assert stats.date_lines == 1
@@ -37,7 +39,7 @@ def test_sanitize_text_preserves_plain_date_line() -> None:
 def test_observe_mode_reports_without_changing_text() -> None:
     text = "Todayʼs date is 2026/06/30."
 
-    sanitized, stats = sanitize_text(text, mode="observe")
+    sanitized, stats = sanitize_text(text, mode="observe", rules=default_rules((DATE_MARKER_RULE,)))
 
     assert sanitized == text
     assert stats.date_lines == 1
@@ -56,8 +58,28 @@ def test_timezone_rule_normalizes_xml_marker() -> None:
     assert stats.replacements == 1
 
 
+def test_timezone_rule_normalizes_xml_marker_whitespace() -> None:
+    text = "<env><timezone> America/Los_Angeles </timezone></env>"
+
+    sanitized, stats = sanitize_text(text, rules=(TimezoneMarkerRule("America/Los_Angeles"),))
+
+    assert sanitized == "<env><timezone>America/Los_Angeles</timezone></env>"
+    assert stats.timezone_markers == 1
+    assert stats.replacements == 1
+
+
 def test_timezone_rule_normalizes_whole_line_marker() -> None:
     text = "Current context:\nTimezone: Asia/Shanghai\nOther text."
+
+    sanitized, stats = sanitize_text(text, rules=(TimezoneMarkerRule("America/Los_Angeles"),))
+
+    assert sanitized == "Current context:\nTimezone: America/Los_Angeles\nOther text."
+    assert stats.timezone_markers == 1
+    assert stats.replacements == 1
+
+
+def test_timezone_rule_normalizes_whole_line_marker_whitespace() -> None:
+    text = "Current context:\nTimezone: America/Los_Angeles \nOther text."
 
     sanitized, stats = sanitize_text(text, rules=(TimezoneMarkerRule("America/Los_Angeles"),))
 
@@ -87,7 +109,7 @@ def test_sanitize_json_value_recurses_over_nested_strings() -> None:
         "metadata": {"user_id": "abc"},
     }
 
-    sanitized, stats = sanitize_json_value(payload)
+    sanitized, stats = sanitize_json_value(payload, rules=default_rules((DATE_MARKER_RULE,)))
 
     assert sanitized == {
         "system": [
@@ -114,7 +136,10 @@ def test_sanitize_json_value_uses_configured_timezone_rule() -> None:
         ],
     }
 
-    sanitized, stats = sanitize_json_value(payload, rules=default_rules("America/Los_Angeles"))
+    sanitized, stats = sanitize_json_value(
+        payload,
+        rules=default_rules((DATE_MARKER_RULE, TIMEZONE_MARKER_RULE), "America/Los_Angeles"),
+    )
 
     assert sanitized == {
         "system": [
@@ -127,6 +152,17 @@ def test_sanitize_json_value_uses_configured_timezone_rule() -> None:
     assert stats.date_lines == 1
     assert stats.timezone_markers == 1
     assert stats.replacements == 1
+
+
+def test_default_rules_caches_configured_timezone_rules() -> None:
+    first_rules = default_rules((TIMEZONE_MARKER_RULE,), "America/Los_Angeles")
+    second_rules = default_rules((TIMEZONE_MARKER_RULE,), "America/Los_Angeles")
+
+    assert first_rules is second_rules
+
+
+def test_default_rules_are_empty_without_explicit_rule_names() -> None:
+    assert default_rules() == ()
 
 
 def test_sanitize_json_value_does_not_touch_unrelated_dates() -> None:

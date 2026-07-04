@@ -46,6 +46,7 @@ class ProxyConfig:
     upstream_base_url: str
     timeout_seconds: float
     mode: Mode = "normalize"
+    sanitizer_rules: tuple[str, ...] = ()
     sanitizer_timezone: str | None = None
     egress_guard: EgressChecker | None = None
 
@@ -211,7 +212,7 @@ class SanitizingProxyHandler(BaseHTTPRequestHandler):
         sanitized, stats = sanitize_json_value(
             decoded,
             self.config.mode,
-            default_rules(self.config.sanitizer_timezone),
+            default_rules(self.config.sanitizer_rules, self.config.sanitizer_timezone),
         )
         if self.config.mode != "normalize" or not stats.changed:
             return body, stats

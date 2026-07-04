@@ -32,9 +32,15 @@ Sanitizer mode applies to every enabled rule:
 
 `normalize` is the default.
 
+No sanitizer rules are enabled by default. Set `SANITIZER_RULES` to a comma-separated list when you want specific rules to run:
+
+```bash
+SANITIZER_RULES=date-marker,timezone-marker
+```
+
 #### Date marker rule
 
-The first built-in rule targets this narrow Claude Code date-line pattern:
+Enable `date-marker` to target this narrow Claude Code date-line pattern:
 
 ```text
 Today['’ʼʹ]s date is YYYY[-/]MM[-/]DD
@@ -50,7 +56,7 @@ The date value is preserved. Unrelated dates and unrelated apostrophes are not m
 
 #### Timezone marker rule
 
-Set `SANITIZER_TIMEZONE` to an IANA timezone, such as `America/Los_Angeles`, when you want the proxy to rewrite Claude Code timezone markers before they reach the upstream API.
+Enable `timezone-marker` and set `SANITIZER_TIMEZONE` to an IANA timezone, such as `America/Los_Angeles`, when you want the proxy to rewrite Claude Code timezone markers before they reach the upstream API.
 
 The rule targets narrow marker formats in JSON string values:
 
@@ -68,7 +74,7 @@ Timezone: America/Los_Angeles
 Time zone: America/Los_Angeles
 ```
 
-The timezone sanitizer is disabled when `SANITIZER_TIMEZONE` is unset. It does not modify inline prose such as `the timezone: Asia/Shanghai example`.
+The timezone sanitizer requires both `SANITIZER_RULES=timezone-marker` and `SANITIZER_TIMEZONE`. It does not modify inline prose such as `the timezone: Asia/Shanghai example`.
 
 When markers are observed, the proxy logs aggregate metadata only:
 
@@ -127,7 +133,7 @@ uv run claude-code-local-proxy --log-file logs/claude-code-local-proxy.log
 To normalize timezone markers inside Claude Code request bodies, configure the proxy:
 
 ```bash
-SANITIZER_TIMEZONE=America/Los_Angeles uv run claude-code-local-proxy
+SANITIZER_RULES=timezone-marker SANITIZER_TIMEZONE=America/Los_Angeles uv run claude-code-local-proxy
 ```
 
 > Note: `TZ` is a Claude Code process setting, not a proxy setting. To make Claude Code and most child processes observe the target timezone, start Claude Code with `TZ` in its own process environment:

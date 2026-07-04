@@ -26,6 +26,7 @@ from claude_code_local_proxy.config import (
     DEFAULT_LOG_FILE,
     DEFAULT_LOG_LEVEL,
     DEFAULT_SANITIZER_MODE,
+    DEFAULT_SANITIZER_RULES,
     DEFAULT_SANITIZER_TIMEZONE,
     DEFAULT_UPSTREAM_BASE_URL,
     DEFAULT_UPSTREAM_TIMEOUT_SECONDS,
@@ -38,7 +39,7 @@ from claude_code_local_proxy.egress_guard import (
     parse_egress_guard_mode,
 )
 from claude_code_local_proxy.proxy import ProxyConfig, run_server
-from claude_code_local_proxy.sanitizer import Mode
+from claude_code_local_proxy.sanitizer import SUPPORTED_RULE_NAMES, TIMEZONE_MARKER_RULE, Mode
 
 _MODES: tuple[Mode, ...] = ("off", "observe", "normalize")
 _LOG_RETENTION_DAYS = 7
@@ -60,6 +61,17 @@ def _parse_timezone(value: str) -> str:
     except ZoneInfoNotFoundError as exc:
         raise ValueError(f"unknown IANA timezone {normalized!r}") from exc
     return normalized
+
+
+def _parse_sanitizer_rules(value: str) -> tuple[str, ...]:
+    names = tuple(name.strip() for name in value.split(",") if name.strip())
+    unknown = sorted(set(names) - set(SUPPORTED_RULE_NAMES))
+    if unknown:
+        supported = ", ".join(SUPPORTED_RULE_NAMES)
+        raise ValueError(f"unknown rule(s): {', '.join(unknown)}; expected one of: {supported}")
+    if len(set(names)) != len(names):
+        raise ValueError("duplicate sanitizer rules are not allowed")
+    return names
 
 
 def _parse_bool(value: str) -> bool:
@@ -113,6 +125,16 @@ def _build_parser() -> argparse.ArgumentParser:
         choices=_MODES,
         default=_get_sanitizer_mode(),
         help="Sanitizer mode: off = forward unchanged, observe = log only, normalize = clean markers.",
+    )
+    parser.add_argument(
+        "--sanitizer-rules",
+        type=_parse_sanitizer_rules,
+        default=_env_value(
+            "SANITIZER_RULES",
+            DEFAULT_SANITIZER_RULES,
+            _parse_sanitizer_rules,
+        ),
+        help="Comma-separated sanitizer rules to enable. Defaults to SANITIZER_RULES or no rules.",
     )
     parser.add_argument(
         "--sanitizer-timezone",
@@ -223,11 +245,13 @@ def _build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> None:
     _load_env()
     args = _build_parser().parse_args(argv)
+    _validate_sanitizer_config(args)
     _configure_logging(args.log_level, args.log_file)
 
     config = ProxyConfig(
         upstream_base_url=args.upstream_base_url,
         mode=args.sanitizer_mode,
+        sanitizer_rules=args.sanitizer_rules,
         sanitizer_timezone=args.sanitizer_timezone,
         timeout_seconds=args.timeout_seconds,
         egress_guard=_build_egress_guard(args),
@@ -258,6 +282,11 @@ def _configure_logging(level_name: str, log_file: str | None) -> None:
         handlers=handlers,
         force=True,
     )
+
+
+def _validate_sanitizer_config(args: argparse.Namespace) -> None:
+    if TIMEZONE_MARKER_RULE in args.sanitizer_rules and args.sanitizer_timezone is None:
+        raise SystemExit("timezone-marker requires SANITIZER_TIMEZONE or --sanitizer-timezone")
 
 
 def _build_egress_guard(args: argparse.Namespace) -> EgressGuard | None:

@@ -45,7 +45,7 @@ class TimezoneMarkerRule:
 
         def replace(match: re.Match[str]) -> str:
             nonlocal stats, changed
-            value = match.group("value").strip()
+            value = match.group("value")
             would_change = value != self.target_timezone
             stats += SanitizeStats(
                 timezone_markers=1,
@@ -64,7 +64,7 @@ class TimezoneMarkerRule:
 
         def replace(match: re.Match[str]) -> str:
             nonlocal stats, changed
-            value = match.group("value").strip()
+            value = match.group("value")
             would_change = value != self.target_timezone
             stats += SanitizeStats(
                 timezone_markers=1,

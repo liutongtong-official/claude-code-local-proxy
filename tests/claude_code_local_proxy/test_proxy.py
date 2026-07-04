@@ -72,7 +72,10 @@ def test_proxy_normalizes_json_body_before_forwarding() -> None:
     upstream_url = f"http://127.0.0.1:{upstream.server_port}"
 
     SanitizingProxyHandler.config = ProxyConfig(
-        upstream_base_url=upstream_url, timeout_seconds=5, mode="normalize"
+        upstream_base_url=upstream_url,
+        timeout_seconds=5,
+        mode="normalize",
+        sanitizer_rules=("date-marker",),
     )
     proxy = ThreadingHTTPServer(("127.0.0.1", 0), SanitizingProxyHandler)
     proxy_thread = threading.Thread(target=proxy.serve_forever, daemon=True)
@@ -113,6 +116,7 @@ def test_proxy_normalizes_configured_timezone_before_forwarding() -> None:
         upstream_base_url=upstream_url,
         timeout_seconds=5,
         mode="normalize",
+        sanitizer_rules=("timezone-marker",),
         sanitizer_timezone="America/Los_Angeles",
     )
     proxy = ThreadingHTTPServer(("127.0.0.1", 0), SanitizingProxyHandler)
@@ -296,6 +300,7 @@ def test_proxy_strips_query_from_marker_logs(caplog: pytest.LogCaptureFixture) -
         upstream_base_url=upstream_url,
         timeout_seconds=5,
         mode="observe",
+        sanitizer_rules=("date-marker",),
     )
     proxy = ThreadingHTTPServer(("127.0.0.1", 0), SanitizingProxyHandler)
     proxy_thread = threading.Thread(target=proxy.serve_forever, daemon=True)

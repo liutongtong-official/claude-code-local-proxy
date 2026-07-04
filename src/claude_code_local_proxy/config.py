@@ -12,6 +12,7 @@ DEFAULT_LOG_LEVEL = "INFO"
 
 # Request sanitizer defaults.
 DEFAULT_SANITIZER_MODE: Mode = "normalize"
+DEFAULT_SANITIZER_RULES: tuple[str, ...] = ()
 DEFAULT_SANITIZER_TIMEZONE: str | None = None
 
 # Upstream API defaults.
