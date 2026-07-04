@@ -8,6 +8,7 @@ import os
 from collections.abc import Callable
 from logging.handlers import TimedRotatingFileHandler
 from pathlib import Path
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from dotenv import find_dotenv, load_dotenv
 
@@ -25,6 +26,7 @@ from claude_code_local_proxy.config import (
     DEFAULT_LOG_FILE,
     DEFAULT_LOG_LEVEL,
     DEFAULT_SANITIZER_MODE,
+    DEFAULT_SANITIZER_TIMEZONE,
     DEFAULT_UPSTREAM_BASE_URL,
     DEFAULT_UPSTREAM_TIMEOUT_SECONDS,
 )
@@ -47,6 +49,17 @@ def _get_sanitizer_mode() -> Mode:
     if value not in _MODES:
         raise SystemExit(f"SANITIZER_MODE must be one of {', '.join(_MODES)} (got {value!r})")
     return value
+
+
+def _parse_timezone(value: str) -> str:
+    normalized = value.strip()
+    if not normalized:
+        raise ValueError("timezone must not be empty")
+    try:
+        ZoneInfo(normalized)
+    except ZoneInfoNotFoundError as exc:
+        raise ValueError(f"unknown IANA timezone {normalized!r}") from exc
+    return normalized
 
 
 def _parse_bool(value: str) -> bool:
@@ -100,6 +113,16 @@ def _build_parser() -> argparse.ArgumentParser:
         choices=_MODES,
         default=_get_sanitizer_mode(),
         help="Sanitizer mode: off = forward unchanged, observe = log only, normalize = clean markers.",
+    )
+    parser.add_argument(
+        "--sanitizer-timezone",
+        type=_parse_timezone,
+        default=_env_value(
+            "SANITIZER_TIMEZONE",
+            DEFAULT_SANITIZER_TIMEZONE,
+            _parse_timezone,
+        ),
+        help="IANA timezone used to normalize Claude Code timezone markers. Defaults to SANITIZER_TIMEZONE or disabled.",
     )
     parser.add_argument(
         "--timeout-seconds",
@@ -205,6 +228,7 @@ def main(argv: list[str] | None = None) -> None:
     config = ProxyConfig(
         upstream_base_url=args.upstream_base_url,
         mode=args.sanitizer_mode,
+        sanitizer_timezone=args.sanitizer_timezone,
         timeout_seconds=args.timeout_seconds,
         egress_guard=_build_egress_guard(args),
     )

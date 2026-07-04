@@ -19,7 +19,12 @@ from claude_code_local_proxy.egress_guard import (
     EgressGuardIpChanged,
     EgressGuardUnavailable,
 )
-from claude_code_local_proxy.sanitizer import Mode, SanitizeStats, sanitize_json_value
+from claude_code_local_proxy.sanitizer import (
+    Mode,
+    SanitizeStats,
+    default_rules,
+    sanitize_json_value,
+)
 
 LOGGER = logging.getLogger(__name__)
 _HOP_BY_HOP_HEADERS = {
@@ -41,6 +46,7 @@ class ProxyConfig:
     upstream_base_url: str
     timeout_seconds: float
     mode: Mode = "normalize"
+    sanitizer_timezone: str | None = None
     egress_guard: EgressChecker | None = None
 
 
@@ -98,12 +104,13 @@ class SanitizingProxyHandler(BaseHTTPRequestHandler):
         if stats.observed:
             LOGGER.info(
                 "marker observed path=%s mode=%s date_lines=%d apostrophe_variants=%d "
-                "slash_dates=%d replacements=%d",
+                "slash_dates=%d timezone_markers=%d replacements=%d",
                 self._safe_log_path(),
                 self.config.mode,
                 stats.date_lines,
                 stats.apostrophe_variants,
                 stats.slash_dates,
+                stats.timezone_markers,
                 stats.replacements,
             )
         request = urllib.request.Request(
@@ -201,7 +208,11 @@ class SanitizingProxyHandler(BaseHTTPRequestHandler):
             decoded = json.loads(body)
         except ValueError:
             return body, SanitizeStats()
-        sanitized, stats = sanitize_json_value(decoded, self.config.mode)
+        sanitized, stats = sanitize_json_value(
+            decoded,
+            self.config.mode,
+            default_rules(self.config.sanitizer_timezone),
+        )
         if self.config.mode != "normalize" or not stats.changed:
             return body, stats
         return json.dumps(sanitized, ensure_ascii=False, separators=(",", ":")).encode(), stats

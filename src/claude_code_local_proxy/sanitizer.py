@@ -7,8 +7,17 @@ from typing import Any
 
 from claude_code_local_proxy.sanitizer_rules.base import Mode, SanitizerRule, SanitizeStats
 from claude_code_local_proxy.sanitizer_rules.date_marker import DateMarkerRule, apostrophe_label
+from claude_code_local_proxy.sanitizer_rules.timezone_marker import TimezoneMarkerRule
 
 DEFAULT_RULES: tuple[SanitizerRule, ...] = (DateMarkerRule(),)
+
+
+def default_rules(target_timezone: str | None = None) -> tuple[SanitizerRule, ...]:
+    """Return built-in sanitizer rules for the current runtime configuration."""
+
+    if target_timezone is None:
+        return DEFAULT_RULES
+    return (*DEFAULT_RULES, TimezoneMarkerRule(target_timezone))
 
 
 def sanitize_text(
@@ -66,7 +75,9 @@ __all__ = [
     "Mode",
     "SanitizeStats",
     "SanitizerRule",
+    "TimezoneMarkerRule",
     "apostrophe_label",
+    "default_rules",
     "sanitize_json_value",
     "sanitize_text",
 ]

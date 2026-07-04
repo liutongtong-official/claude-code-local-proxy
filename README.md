@@ -48,10 +48,32 @@ Today's date is YYYY-MM-DD
 
 The date value is preserved. Unrelated dates and unrelated apostrophes are not modified.
 
+#### Timezone marker rule
+
+Set `SANITIZER_TIMEZONE` to an IANA timezone, such as `America/Los_Angeles`, when you want the proxy to rewrite Claude Code timezone markers before they reach the upstream API.
+
+The rule targets narrow marker formats in JSON string values:
+
+```text
+<timezone>Asia/Shanghai</timezone>
+Timezone: Asia/Shanghai
+Time zone: Asia/Shanghai
+```
+
+In `normalize` mode they become:
+
+```text
+<timezone>America/Los_Angeles</timezone>
+Timezone: America/Los_Angeles
+Time zone: America/Los_Angeles
+```
+
+The timezone sanitizer is disabled when `SANITIZER_TIMEZONE` is unset. It does not modify inline prose such as `the timezone: Asia/Shanghai example`.
+
 When markers are observed, the proxy logs aggregate metadata only:
 
 ```text
-marker observed path=/v1/messages mode=normalize date_lines=1 apostrophe_variants=1 slash_dates=1 replacements=1
+marker observed path=/v1/messages mode=normalize date_lines=1 apostrophe_variants=1 slash_dates=1 timezone_markers=1 replacements=2
 ```
 
 It does not log full prompts or request bodies.
@@ -101,6 +123,26 @@ To keep logs in a file as well as the console, pass `--log-file` or set `LOG_FIL
 ```bash
 uv run claude-code-local-proxy --log-file logs/claude-code-local-proxy.log
 ```
+
+To normalize timezone markers inside Claude Code request bodies, configure the proxy:
+
+```bash
+SANITIZER_TIMEZONE=America/Los_Angeles uv run claude-code-local-proxy
+```
+
+> Note: `TZ` is a Claude Code process setting, not a proxy setting. To make Claude Code and most child processes observe the target timezone, start Claude Code with `TZ` in its own process environment:
+>
+> ```bash
+> TZ=America/Los_Angeles ANTHROPIC_BASE_URL=http://127.0.0.1:8787 claude
+> ```
+>
+> For repeated use, add a shell function to your shell config:
+>
+> ```bash
+> claude-la() {
+>   TZ=America/Los_Angeles ANTHROPIC_BASE_URL=http://127.0.0.1:8787 claude "$@"
+> }
+> ```
 
 Start the proxy in the background:
 

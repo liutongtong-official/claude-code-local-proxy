@@ -3,9 +3,11 @@
 from claude_code_local_proxy.sanitizer import (
     Mode,
     SanitizeStats,
+    default_rules,
     sanitize_json_value,
     sanitize_text,
 )
+from claude_code_local_proxy.sanitizer_rules.timezone_marker import TimezoneMarkerRule
 
 
 def test_sanitize_text_normalizes_apostrophe_variant_and_slash_date() -> None:
@@ -44,6 +46,36 @@ def test_observe_mode_reports_without_changing_text() -> None:
     assert stats.replacements == 0
 
 
+def test_timezone_rule_normalizes_xml_marker() -> None:
+    text = "<env><timezone>Asia/Shanghai</timezone></env>"
+
+    sanitized, stats = sanitize_text(text, rules=(TimezoneMarkerRule("America/Los_Angeles"),))
+
+    assert sanitized == "<env><timezone>America/Los_Angeles</timezone></env>"
+    assert stats.timezone_markers == 1
+    assert stats.replacements == 1
+
+
+def test_timezone_rule_normalizes_whole_line_marker() -> None:
+    text = "Current context:\nTimezone: Asia/Shanghai\nOther text."
+
+    sanitized, stats = sanitize_text(text, rules=(TimezoneMarkerRule("America/Los_Angeles"),))
+
+    assert sanitized == "Current context:\nTimezone: America/Los_Angeles\nOther text."
+    assert stats.timezone_markers == 1
+    assert stats.replacements == 1
+
+
+def test_timezone_rule_does_not_touch_inline_unrelated_text() -> None:
+    text = "The timezone: Asia/Shanghai example should stay."
+
+    sanitized, stats = sanitize_text(text, rules=(TimezoneMarkerRule("America/Los_Angeles"),))
+
+    assert sanitized == text
+    assert stats.timezone_markers == 0
+    assert stats.replacements == 0
+
+
 def test_sanitize_json_value_recurses_over_nested_strings() -> None:
     payload = {
         "system": [
@@ -69,6 +101,31 @@ def test_sanitize_json_value_recurses_over_nested_strings() -> None:
     assert stats.date_lines == 1
     assert stats.apostrophe_variants == 1
     assert stats.slash_dates == 1
+    assert stats.replacements == 1
+
+
+def test_sanitize_json_value_uses_configured_timezone_rule() -> None:
+    payload = {
+        "system": [
+            {
+                "type": "text",
+                "text": "Today's date is 2026-06-30.\n<timezone>Asia/Shanghai</timezone>",
+            }
+        ],
+    }
+
+    sanitized, stats = sanitize_json_value(payload, rules=default_rules("America/Los_Angeles"))
+
+    assert sanitized == {
+        "system": [
+            {
+                "type": "text",
+                "text": "Today's date is 2026-06-30.\n<timezone>America/Los_Angeles</timezone>",
+            }
+        ],
+    }
+    assert stats.date_lines == 1
+    assert stats.timezone_markers == 1
     assert stats.replacements == 1
 
 

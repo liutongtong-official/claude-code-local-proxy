@@ -20,6 +20,7 @@ _CLI_ENV_KEYS = (
     "UPSTREAM_BASE_URL",
     "UPSTREAM_TIMEOUT_SECONDS",
     "SANITIZER_MODE",
+    "SANITIZER_TIMEZONE",
     "EGRESS_GUARD_ENABLED",
     "EGRESS_GUARD_MODE",
     "EGRESS_GUARD_FIXED_IP",
@@ -97,6 +98,37 @@ def test_cli_rejects_invalid_sanitizer_mode(monkeypatch: pytest.MonkeyPatch) -> 
 
     with pytest.raises(SystemExit, match="SANITIZER_MODE must be one of"):
         main(["--listen-port", "0"])
+
+
+def test_cli_accepts_sanitizer_timezone(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_run_server(host: str, port: int, config: object) -> None:
+        captured["config"] = config
+
+    _clear_cli_env(monkeypatch)
+    monkeypatch.setattr("claude_code_local_proxy.cli.run_server", fake_run_server)
+
+    main(["--listen-port", "0", "--sanitizer-timezone", "America/Los_Angeles"])
+
+    config = captured["config"]
+    assert isinstance(config, ProxyConfig)
+    assert config.sanitizer_timezone == "America/Los_Angeles"
+
+
+def test_cli_rejects_invalid_sanitizer_timezone(monkeypatch: pytest.MonkeyPatch) -> None:
+    _clear_cli_env(monkeypatch)
+    monkeypatch.setenv("SANITIZER_TIMEZONE", "Mars/Olympus")
+
+    with pytest.raises(SystemExit, match="SANITIZER_TIMEZONE is invalid"):
+        main(["--listen-port", "0"])
+
+
+def test_cli_rejects_invalid_sanitizer_timezone_arg(monkeypatch: pytest.MonkeyPatch) -> None:
+    _clear_cli_env(monkeypatch)
+
+    with pytest.raises(SystemExit):
+        main(["--listen-port", "0", "--sanitizer-timezone", "Mars/Olympus"])
 
 
 def test_cli_can_disable_egress_guard(monkeypatch: pytest.MonkeyPatch) -> None:
