@@ -149,6 +149,51 @@ def test_proxy_normalizes_configured_timezone_before_forwarding() -> None:
         upstream.server_close()
 
 
+def test_proxy_normalizes_local_base_url_before_forwarding() -> None:
+    upstream = HTTPServer(("127.0.0.1", 0), CaptureHandler)
+    CaptureHandler.request_count = 0
+    upstream_thread = threading.Thread(target=upstream.serve_forever, daemon=True)
+    upstream_thread.start()
+    upstream_url = f"http://127.0.0.1:{upstream.server_port}"
+
+    SanitizingProxyHandler.config = ProxyConfig(
+        upstream_base_url=upstream_url,
+        timeout_seconds=5,
+        mode="normalize",
+        sanitizer_rules=("base-url",),
+        sanitizer_public_base_url="https://api.anthropic.com",
+        sanitizer_local_base_urls=("http://127.0.0.1:8787", "http://localhost:8787"),
+    )
+    proxy = ThreadingHTTPServer(("127.0.0.1", 0), SanitizingProxyHandler)
+    proxy_thread = threading.Thread(target=proxy.serve_forever, daemon=True)
+    proxy_thread.start()
+
+    try:
+        payload = json.dumps(
+            {"system": "Claude Code base URL is http://127.0.0.1:8787/v1/messages"},
+            ensure_ascii=False,
+        ).encode()
+        request = urllib.request.Request(
+            f"http://127.0.0.1:{proxy.server_address[1]}/v1/messages",
+            data=payload,
+            headers={"content-type": "application/json"},
+            method="POST",
+        )
+
+        with urllib.request.urlopen(request, timeout=5) as response:
+            assert response.read() == b'{"ok":true}'
+
+        assert json.loads(CaptureHandler.captured_body) == {
+            "system": "Claude Code base URL is https://api.anthropic.com/v1/messages"
+        }
+        assert CaptureHandler.request_count == 1
+    finally:
+        proxy.shutdown()
+        upstream.shutdown()
+        proxy.server_close()
+        upstream.server_close()
+
+
 def test_proxy_rejects_chunked_request_body() -> None:
     SanitizingProxyHandler.config = ProxyConfig(
         upstream_base_url="http://127.0.0.1:1",

@@ -1,6 +1,7 @@
 """Tests for Claude Code marker sanitizing."""
 
 from claude_code_local_proxy.sanitizer import (
+    BASE_URL_RULE,
     DATE_MARKER_RULE,
     TIMEZONE_MARKER_RULE,
     Mode,
@@ -98,6 +99,75 @@ def test_timezone_rule_does_not_touch_inline_unrelated_text() -> None:
     assert stats.replacements == 0
 
 
+def test_base_url_rule_replaces_local_proxy_urls() -> None:
+    text = "Base URL: http://127.0.0.1:8787/v1/messages"
+
+    sanitized, stats = sanitize_text(
+        text,
+        rules=default_rules(
+            (BASE_URL_RULE,),
+            public_base_url="https://api.anthropic.com",
+            local_base_urls=("http://127.0.0.1:8787", "http://localhost:8787"),
+        ),
+    )
+
+    assert sanitized == "Base URL: https://api.anthropic.com/v1/messages"
+    assert stats.base_urls == 1
+    assert stats.replacements == 1
+
+
+def test_base_url_rule_observe_mode_reports_without_changing_text() -> None:
+    text = "Base URL: http://localhost:8787/v1/messages"
+
+    sanitized, stats = sanitize_text(
+        text,
+        mode="observe",
+        rules=default_rules(
+            (BASE_URL_RULE,),
+            public_base_url="https://api.anthropic.com",
+            local_base_urls=("http://127.0.0.1:8787", "http://localhost:8787"),
+        ),
+    )
+
+    assert sanitized == text
+    assert stats.base_urls == 1
+    assert stats.replacements == 0
+
+
+def test_base_url_rule_does_not_replace_port_prefix() -> None:
+    text = "Other service: http://127.0.0.1:87870/v1/messages"
+
+    sanitized, stats = sanitize_text(
+        text,
+        rules=default_rules(
+            (BASE_URL_RULE,),
+            public_base_url="https://api.anthropic.com",
+            local_base_urls=("http://127.0.0.1:8787",),
+        ),
+    )
+
+    assert sanitized == text
+    assert stats.base_urls == 0
+    assert stats.replacements == 0
+
+
+def test_base_url_rule_replaces_before_sentence_punctuation() -> None:
+    text = "Base URL: http://127.0.0.1:8787."
+
+    sanitized, stats = sanitize_text(
+        text,
+        rules=default_rules(
+            (BASE_URL_RULE,),
+            public_base_url="https://api.anthropic.com",
+            local_base_urls=("http://127.0.0.1:8787",),
+        ),
+    )
+
+    assert sanitized == "Base URL: https://api.anthropic.com."
+    assert stats.base_urls == 1
+    assert stats.replacements == 1
+
+
 def test_sanitize_json_value_recurses_over_nested_strings() -> None:
     payload = {
         "system": [
@@ -154,9 +224,55 @@ def test_sanitize_json_value_uses_configured_timezone_rule() -> None:
     assert stats.replacements == 1
 
 
+def test_sanitize_json_value_uses_configured_base_url_rule() -> None:
+    payload = {
+        "system": [
+            {
+                "type": "text",
+                "text": "API base: http://127.0.0.1:8787",
+            }
+        ],
+    }
+
+    sanitized, stats = sanitize_json_value(
+        payload,
+        rules=default_rules(
+            (BASE_URL_RULE,),
+            public_base_url="https://api.anthropic.com",
+            local_base_urls=("http://127.0.0.1:8787", "http://localhost:8787"),
+        ),
+    )
+
+    assert sanitized == {
+        "system": [
+            {
+                "type": "text",
+                "text": "API base: https://api.anthropic.com",
+            }
+        ],
+    }
+    assert stats.base_urls == 1
+    assert stats.replacements == 1
+
+
 def test_default_rules_caches_configured_timezone_rules() -> None:
     first_rules = default_rules((TIMEZONE_MARKER_RULE,), "America/Los_Angeles")
     second_rules = default_rules((TIMEZONE_MARKER_RULE,), "America/Los_Angeles")
+
+    assert first_rules is second_rules
+
+
+def test_default_rules_caches_configured_base_url_rules() -> None:
+    first_rules = default_rules(
+        (BASE_URL_RULE,),
+        public_base_url="https://api.anthropic.com",
+        local_base_urls=("http://127.0.0.1:8787",),
+    )
+    second_rules = default_rules(
+        (BASE_URL_RULE,),
+        public_base_url="https://api.anthropic.com",
+        local_base_urls=("http://127.0.0.1:8787",),
+    )
 
     assert first_rules is second_rules
 

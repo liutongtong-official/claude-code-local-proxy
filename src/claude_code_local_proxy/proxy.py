@@ -48,6 +48,8 @@ class ProxyConfig:
     mode: Mode = "normalize"
     sanitizer_rules: tuple[str, ...] = ()
     sanitizer_timezone: str | None = None
+    sanitizer_public_base_url: str | None = None
+    sanitizer_local_base_urls: tuple[str, ...] = ()
     egress_guard: EgressChecker | None = None
 
 
@@ -105,13 +107,14 @@ class SanitizingProxyHandler(BaseHTTPRequestHandler):
         if stats.observed:
             LOGGER.info(
                 "marker observed path=%s mode=%s date_lines=%d apostrophe_variants=%d "
-                "slash_dates=%d timezone_markers=%d replacements=%d",
+                "slash_dates=%d timezone_markers=%d base_urls=%d replacements=%d",
                 self._safe_log_path(),
                 self.config.mode,
                 stats.date_lines,
                 stats.apostrophe_variants,
                 stats.slash_dates,
                 stats.timezone_markers,
+                stats.base_urls,
                 stats.replacements,
             )
         request = urllib.request.Request(
@@ -212,7 +215,12 @@ class SanitizingProxyHandler(BaseHTTPRequestHandler):
         sanitized, stats = sanitize_json_value(
             decoded,
             self.config.mode,
-            default_rules(self.config.sanitizer_rules, self.config.sanitizer_timezone),
+            default_rules(
+                self.config.sanitizer_rules,
+                self.config.sanitizer_timezone,
+                self.config.sanitizer_public_base_url,
+                self.config.sanitizer_local_base_urls,
+            ),
         )
         if self.config.mode != "normalize" or not stats.changed:
             return body, stats
