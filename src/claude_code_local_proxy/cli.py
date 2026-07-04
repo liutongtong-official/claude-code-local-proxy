@@ -108,10 +108,27 @@ def _env_value[T](name: str, default: T, parser: Callable[[str], T]) -> T:
 
 def _load_env() -> None:
     # Precedence (highest → lowest): real env > .env.local > .env.
+    # With override=False the first loader to set a key wins, and real env
+    # vars are already in os.environ, so they always take priority; loading
+    # .env.local before .env lets it override the shared defaults.
+    #
+    # find_dotenv(usecwd=True) walks up from cwd, so the loader works from any
+    # subdirectory of the project, not only the project root.
+    #
+    # Under pytest (PYTEST_VERSION is set at startup, before any test imports)
+    # load no dotenv file, so a developer's real .env secrets never leak into
+    # test runs and make them hit external services. Works whether the loader
+    # runs from main() or at import.
     if "PYTEST_VERSION" in os.environ:
         return
-    load_dotenv(find_dotenv(".env.local", usecwd=True), override=False)
-    load_dotenv(find_dotenv(".env", usecwd=True), override=False)
+
+    # Load only files that exist. find_dotenv returns "" when a file is absent;
+    # loading solely on a real path keeps this independent of how load_dotenv
+    # treats an empty path, rather than relying on it being a no-op.
+    if env_local := find_dotenv(".env.local", usecwd=True):
+        load_dotenv(env_local, override=False)
+    if env_shared := find_dotenv(".env", usecwd=True):
+        load_dotenv(env_shared, override=False)
 
 
 def _build_parser() -> argparse.ArgumentParser:
