@@ -173,8 +173,17 @@ class SanitizingProxyHandler(BaseHTTPRequestHandler):
             self.close_connection = True
             self._send_json_error(HTTPStatus.SERVICE_UNAVAILABLE, str(exc))
             return False
-        if location is not None:
-            LOGGER.debug(
+        if location is None:
+            return True
+        if location.provider == "fixed-ip":
+            LOGGER.info(
+                "egress fixed IP allowed path=%s expected_ip=%s current_ip=%s",
+                self._safe_log_path(),
+                location.ip or "?",
+                location.ip or "?",
+            )
+        else:
+            LOGGER.info(
                 "egress allowed path=%s country_code=%s provider=%s ip=%s",
                 self._safe_log_path(),
                 location.country_code,

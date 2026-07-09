@@ -200,6 +200,9 @@ class EgressGuard:
                 ip = self._fetch_public_ip(provider)
             except Exception as exc:  # pragma: no cover - provider failures vary at runtime
                 provider_errors.append(f"{provider.name}: {exc}")
+                LOGGER.warning(
+                    "egress public IP provider failed provider=%s error=%s", provider.name, exc
+                )
                 continue
             self._remember_ip_provider(provider.name)
             self._cache_current_public_ip(ip)
@@ -271,9 +274,20 @@ class EgressGuard:
                 location = self._fetch_location(provider, ip)
             except Exception as exc:  # pragma: no cover - provider failures vary at runtime
                 provider_errors.append(f"{provider.name}: {exc}")
+                LOGGER.warning(
+                    "egress location provider failed provider=%s ip=%s error=%s",
+                    provider.name,
+                    ip,
+                    exc,
+                )
                 continue
             if location is None:
                 provider_errors.append(f"{provider.name}: no country code in response")
+                LOGGER.warning(
+                    "egress location provider returned no country code provider=%s ip=%s",
+                    provider.name,
+                    ip,
+                )
                 continue
             return location, provider_errors
         return None, provider_errors
