@@ -115,6 +115,8 @@ The guard checks the current public IP, looks up that IP's country code, and ret
 
 The guard uses public IP and geolocation providers without sending prompts, request bodies, response bodies, or credentials to those providers. When the current public IP needs to be refreshed, it sends one request to identify it, then uses a local `public_ip -> country_code` cache to avoid repeated GeoIP lookups for the same IP.
 
+When the guard is enabled, allowed requests log the checked IP, country code, and provider. Provider failures are logged with the provider name and error summary so routing and GeoIP outages are visible without logging request bodies or credentials.
+
 #### `fixed-ip` mode
 
 Set `EGRESS_GUARD_MODE=fixed-ip` when you want to allow only one known public egress IP. `EGRESS_GUARD_FIXED_IP` is required in this mode; with `EGRESS_GUARD_FIXED_IP=203.0.113.10`, only that public IP is allowed. If the proxy observes any other public IP, it returns `451` before forwarding the request upstream.

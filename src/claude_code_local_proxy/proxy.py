@@ -174,7 +174,7 @@ class SanitizingProxyHandler(BaseHTTPRequestHandler):
             self._send_json_error(HTTPStatus.SERVICE_UNAVAILABLE, str(exc))
             return False
         if location is not None:
-            LOGGER.debug(
+            LOGGER.info(
                 "egress allowed path=%s country_code=%s provider=%s ip=%s",
                 self._safe_log_path(),
                 location.country_code,

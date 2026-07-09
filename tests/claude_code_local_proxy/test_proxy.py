@@ -64,6 +64,11 @@ class ChangedIpGuard:
         raise EgressGuardIpChanged(expected_ip="198.51.100.10", current_ip="203.0.113.10")
 
 
+class AllowingGuard:
+    def ensure_allowed(self) -> EgressLocation:
+        return EgressLocation(provider="test", country_code="US", ip="198.51.100.10")
+
+
 def test_proxy_normalizes_json_body_before_forwarding() -> None:
     upstream = HTTPServer(("127.0.0.1", 0), CaptureHandler)
     CaptureHandler.request_count = 0
@@ -328,6 +333,53 @@ def test_proxy_blocks_request_before_forwarding_when_fixed_egress_ip_changes() -
         assert exc_info.value.code == HTTPStatus.UNAVAILABLE_FOR_LEGAL_REASONS
         assert b"expected_ip=198.51.100.10" in exc_info.value.read()
         assert CaptureHandler.request_count == 0
+    finally:
+        proxy.shutdown()
+        upstream.shutdown()
+        proxy.server_close()
+        upstream.server_close()
+
+
+def test_proxy_logs_allowed_egress_location_without_query_or_body(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    upstream = HTTPServer(("127.0.0.1", 0), CaptureHandler)
+    CaptureHandler.request_count = 0
+    upstream_thread = threading.Thread(target=upstream.serve_forever, daemon=True)
+    upstream_thread.start()
+    upstream_url = f"http://127.0.0.1:{upstream.server_port}"
+
+    SanitizingProxyHandler.config = ProxyConfig(
+        upstream_base_url=upstream_url,
+        timeout_seconds=5,
+        mode="normalize",
+        egress_guard=AllowingGuard(),
+    )
+    proxy = ThreadingHTTPServer(("127.0.0.1", 0), SanitizingProxyHandler)
+    proxy_thread = threading.Thread(target=proxy.serve_forever, daemon=True)
+    proxy_thread.start()
+
+    try:
+        request = urllib.request.Request(
+            f"http://127.0.0.1:{proxy.server_address[1]}/v1/messages?api_key=secret",
+            data=b'{"prompt":"secret"}',
+            headers={"content-type": "application/json"},
+            method="POST",
+        )
+
+        with (
+            caplog.at_level("INFO", logger="claude_code_local_proxy.proxy"),
+            urllib.request.urlopen(request, timeout=5) as response,
+        ):
+            assert response.read() == b'{"ok":true}'
+
+        messages = "\n".join(record.getMessage() for record in caplog.records)
+        assert (
+            "egress allowed path=/v1/messages country_code=US provider=test ip=198.51.100.10"
+            in messages
+        )
+        assert "api_key=secret" not in messages
+        assert "prompt" not in messages
     finally:
         proxy.shutdown()
         upstream.shutdown()
