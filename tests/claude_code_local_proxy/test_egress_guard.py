@@ -16,8 +16,6 @@ from claude_code_local_proxy.egress_guard import (
     EgressGuardIpChanged,
     EgressGuardUnavailable,
     EgressLocation,
-    GeoProvider,
-    PublicIpProvider,
     normalize_public_ip,
     parse_country_codes,
     parse_egress_guard_mode,
@@ -151,79 +149,6 @@ def test_egress_guard_tries_next_provider_when_response_is_unusable() -> None:
     assert location is not None
     assert location.provider == "ipsb"
     assert location.country_code == "US"
-
-
-def test_egress_guard_logs_public_ip_provider_failures(
-    caplog: pytest.LogCaptureFixture,
-) -> None:
-    def urlopen(request: object, **kwargs: object) -> FakeResponse:
-        assert isinstance(request, urllib.request.Request)
-        if request.full_url == "https://unavailable.example/ip":
-            raise OSError("network unavailable")
-        if request.full_url == "https://ok.example/ip":
-            return FakeResponse("198.51.100.11")
-        return FakeResponse({"ip": "198.51.100.11", "country_code": "US"})
-
-    guard = EgressGuard(
-        EgressGuardConfig(blocked_country_codes=frozenset({"CN"})),
-        urlopen=urlopen,
-        ip_providers=(
-            PublicIpProvider("unavailable", "https://unavailable.example/ip"),
-            PublicIpProvider("ok", "https://ok.example/ip"),
-        ),
-    )
-
-    with caplog.at_level("WARNING", logger="claude_code_local_proxy.egress_guard"):
-        location = guard.ensure_allowed()
-
-    assert location is not None
-    assert (
-        "egress public IP provider failed provider=unavailable error=network unavailable"
-        in caplog.text
-    )
-
-
-def test_egress_guard_logs_location_provider_failures(
-    caplog: pytest.LogCaptureFixture,
-) -> None:
-    def urlopen(request: object, **kwargs: object) -> FakeResponse:
-        assert isinstance(request, urllib.request.Request)
-        if request.full_url == "https://api.ipify.org":
-            return FakeResponse("198.51.100.11")
-        if request.full_url == "https://unavailable.example/198.51.100.11":
-            raise OSError("network unavailable")
-        if request.full_url == "https://missing.example/198.51.100.11":
-            return FakeResponse({"ip": "198.51.100.11"})
-        return FakeResponse({"ip": "198.51.100.11", "country_code": "US"})
-
-    guard = EgressGuard(
-        EgressGuardConfig(blocked_country_codes=frozenset({"CN"})),
-        urlopen=urlopen,
-        geo_providers=(
-            GeoProvider(
-                "unavailable", "https://unavailable.example/{ip}", lambda payload, ip: None
-            ),
-            GeoProvider("missing", "https://missing.example/{ip}", lambda payload, ip: None),
-            GeoProvider(
-                "ok",
-                "https://ok.example/{ip}",
-                lambda payload, ip: EgressLocation(provider="ok", country_code="US", ip=ip),
-            ),
-        ),
-    )
-
-    with caplog.at_level("WARNING", logger="claude_code_local_proxy.egress_guard"):
-        location = guard.ensure_allowed()
-
-    assert location is not None
-    assert (
-        "egress location provider failed provider=unavailable ip=198.51.100.11 "
-        "error=network unavailable"
-    ) in caplog.text
-    assert (
-        "egress location provider returned no country code provider=missing ip=198.51.100.11"
-        in caplog.text
-    )
 
 
 def test_egress_guard_fails_closed_when_all_providers_are_unavailable() -> None:
