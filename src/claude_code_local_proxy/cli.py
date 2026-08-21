@@ -23,6 +23,7 @@ from claude_code_local_proxy.config import (
     DEFAULT_EGRESS_GUARD_PUBLIC_IP_CACHE_SECONDS,
     DEFAULT_LISTEN_HOST,
     DEFAULT_LISTEN_PORT,
+    DEFAULT_LOG_CONSOLE,
     DEFAULT_LOG_FILE,
     DEFAULT_LOG_LEVEL,
     DEFAULT_SANITIZER_MODE,
@@ -280,6 +281,12 @@ def _build_parser() -> argparse.ArgumentParser:
         default=os.getenv("LOG_FILE", DEFAULT_LOG_FILE),
         help="Optional path to also write logs to. Defaults to LOG_FILE or console-only logging.",
     )
+    parser.add_argument(
+        "--console-log",
+        action=argparse.BooleanOptionalAction,
+        default=_env_value("LOG_CONSOLE", DEFAULT_LOG_CONSOLE, _parse_bool),
+        help="Write logs to the console. Defaults to LOG_CONSOLE or enabled. Disable it under a supervisor that already captures stderr to a file.",
+    )
     return parser
 
 
@@ -287,7 +294,7 @@ def main(argv: list[str] | None = None) -> None:
     _load_env()
     args = _build_parser().parse_args(argv)
     _validate_sanitizer_config(args)
-    _configure_logging(args.log_level, args.log_file)
+    _configure_logging(args.log_level, args.log_file, console=args.console_log)
 
     config = ProxyConfig(
         upstream_base_url=args.upstream_base_url,
@@ -302,8 +309,13 @@ def main(argv: list[str] | None = None) -> None:
     run_server(args.listen_host, args.listen_port, config)
 
 
-def _configure_logging(level_name: str, log_file: str | None) -> None:
-    handlers: list[logging.Handler] = [logging.StreamHandler()]
+def _configure_logging(level_name: str, log_file: str | None, *, console: bool) -> None:
+    # Dropping the console without a log file would leave the proxy with nowhere
+    # to report a failure, so reject the combination instead of running silently.
+    if not console and not log_file:
+        raise SystemExit("--no-console-log requires LOG_FILE or --log-file")
+
+    handlers: list[logging.Handler] = [logging.StreamHandler()] if console else []
     if log_file:
         try:
             log_path = Path(log_file)

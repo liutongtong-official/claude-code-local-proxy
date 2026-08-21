@@ -35,6 +35,7 @@ _CLI_ENV_KEYS = (
     "EGRESS_GUARD_IP_REGION_CACHE_SECONDS",
     "LOG_FILE",
     "LOG_LEVEL",
+    "LOG_CONSOLE",
 )
 
 
@@ -60,6 +61,13 @@ def _restore_logging() -> Iterator[None]:
             if handler not in root.handlers:
                 root.addHandler(handler)
         root.setLevel(old_level)
+
+
+def _is_console_handler(handler: logging.Handler) -> bool:
+    # FileHandler subclasses StreamHandler, so exclude it to isolate console output.
+    return isinstance(handler, logging.StreamHandler) and not isinstance(
+        handler, logging.FileHandler
+    )
 
 
 def _flush_root_log_handlers() -> None:
@@ -322,6 +330,72 @@ def test_cli_can_write_logs_to_file_from_env(
     assert "saved log marker" in log_file.read_text()
 
 
+def test_cli_logs_to_console_and_file_by_default(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    log_file = tmp_path / "runtime" / "proxy.log"
+
+    def fake_run_server(host: str, port: int, config: object) -> None:
+        pass
+
+    _clear_cli_env(monkeypatch)
+    monkeypatch.setattr("claude_code_local_proxy.cli.run_server", fake_run_server)
+
+    main(["--listen-port", "0", "--log-file", str(log_file)])
+
+    handlers = logging.getLogger().handlers
+    assert any(_is_console_handler(handler) for handler in handlers)
+    assert any(isinstance(handler, TimedRotatingFileHandler) for handler in handlers)
+
+
+def test_cli_can_disable_console_logging(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    log_file = tmp_path / "runtime" / "proxy.log"
+
+    def fake_run_server(host: str, port: int, config: object) -> None:
+        logging.getLogger("claude_code_local_proxy.tests").warning("saved log marker")
+
+    _clear_cli_env(monkeypatch)
+    monkeypatch.setattr("claude_code_local_proxy.cli.run_server", fake_run_server)
+
+    main(["--listen-port", "0", "--log-file", str(log_file), "--no-console-log"])
+    _flush_root_log_handlers()
+
+    handlers = logging.getLogger().handlers
+    assert not any(_is_console_handler(handler) for handler in handlers)
+    assert "saved log marker" in log_file.read_text()
+
+
+def test_cli_can_disable_console_logging_from_env(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    log_file = tmp_path / "runtime" / "proxy.log"
+
+    def fake_run_server(host: str, port: int, config: object) -> None:
+        pass
+
+    _clear_cli_env(monkeypatch)
+    monkeypatch.setenv("LOG_CONSOLE", "false")
+    monkeypatch.setattr("claude_code_local_proxy.cli.run_server", fake_run_server)
+
+    main(["--listen-port", "0", "--log-file", str(log_file)])
+
+    assert not any(_is_console_handler(handler) for handler in logging.getLogger().handlers)
+
+
+def test_cli_rejects_disabled_console_logging_without_log_file(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _clear_cli_env(monkeypatch)
+
+    with pytest.raises(SystemExit, match="--no-console-log requires LOG_FILE"):
+        main(["--listen-port", "0", "--no-console-log"])
+
+
 def test_background_make_targets_dry_run() -> None:
     if not shutil.which("make"):
         pytest.skip("make is not installed")
@@ -337,6 +411,14 @@ def test_background_make_targets_dry_run() -> None:
 
     assert "nohup uv run claude-code-local-proxy" in result.stdout
     assert "proxy stopped pid=$PID" in result.stdout
+
+
+def test_launchd_template_disables_console_logging() -> None:
+    # launchd captures stderr into a file it never rotates, so the agent must not
+    # duplicate records that already go to the rotating log file.
+    template = Path(__file__).parents[2] / "scripts/launchd/local.claude-code-local-proxy.plist.in"
+
+    assert "<string>--no-console-log</string>" in template.read_text()
 
 
 def test_cli_rejects_invalid_egress_guard_country_code(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -11,6 +11,7 @@
 		<string>claude-code-local-proxy</string>
 		<string>--log-file</string>
 		<string>${PROXY_LOG_FILE}</string>
+		<string>--no-console-log</string>
 	</array>
 	<key>WorkingDirectory</key>
 	<string>${WORKING_DIRECTORY}</string>

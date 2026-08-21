@@ -149,6 +149,8 @@ To keep logs in a file as well as the console, pass `--log-file` or set `LOG_FIL
 uv run claude-code-local-proxy --log-file logs/claude-code-local-proxy.log
 ```
 
+The file is rotated at midnight and keeps seven days of history. Console output stays on alongside it; pass `--no-console-log` or set `LOG_CONSOLE=false` to write records only to the file. That suits a supervisor that redirects stderr to a file of its own, where console output would store a second copy of every record. A log file is required whenever console output is off, so the proxy always has somewhere to report a failure.
+
 To normalize timezone markers inside Claude Code request bodies, configure the proxy:
 
 ```bash
@@ -192,7 +194,7 @@ On macOS, install a user LaunchAgent so the proxy starts automatically when you 
 make install-autostart
 ```
 
-The LaunchAgent runs the same proxy command from this project directory, writes application logs to `logs/claude-code-local-proxy.log`, and loads `.env` from the project root. Installing it stops the manual `make run-bg` process first so launchd can own the running service. Check or remove it with:
+The LaunchAgent runs the same proxy command from this project directory, writes application logs to `logs/claude-code-local-proxy.log`, and loads `.env` from the project root. It passes `--no-console-log`, so the `.launchd.err.log` file launchd captures holds only startup failures rather than a second, unrotated copy of the application log. Installing it stops the manual `make run-bg` process first so launchd can own the running service. Check or remove it with:
 
 ```bash
 make status-autostart

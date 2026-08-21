@@ -9,6 +9,7 @@ DEFAULT_LISTEN_HOST = "127.0.0.1"
 DEFAULT_LISTEN_PORT = 8787
 DEFAULT_LOG_FILE: str | None = None
 DEFAULT_LOG_LEVEL = "INFO"
+DEFAULT_LOG_CONSOLE = True
 
 # Request sanitizer defaults.
 DEFAULT_SANITIZER_MODE: Mode = "normalize"
