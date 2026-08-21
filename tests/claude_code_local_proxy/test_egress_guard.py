@@ -10,6 +10,7 @@ from typing import Any
 import pytest
 
 from claude_code_local_proxy.egress_guard import (
+    _PUBLIC_IP_PROVIDERS,
     EgressGuard,
     EgressGuardBlocked,
     EgressGuardConfig,
@@ -332,7 +333,7 @@ def test_egress_guard_reuses_last_successful_public_ip_provider() -> None:
         assert isinstance(request, urllib.request.Request)
         url = request.full_url
         urls.append(url)
-        if url == "https://api.ipify.org":
+        if url == "https://icanhazip.com":
             raise OSError("provider unavailable")
         if url == "https://checkip.amazonaws.com":
             return FakeResponse("198.51.100.12")
@@ -346,8 +347,16 @@ def test_egress_guard_reuses_last_successful_public_ip_provider() -> None:
     guard.ensure_allowed()
     guard.ensure_allowed()
 
-    assert urls[:2] == ["https://api.ipify.org", "https://checkip.amazonaws.com"]
+    assert urls[:2] == ["https://icanhazip.com", "https://checkip.amazonaws.com"]
     assert urls[3] == "https://checkip.amazonaws.com"
+
+
+def test_public_ip_providers_try_the_fastest_observed_provider_first() -> None:
+    assert [provider.name for provider in _PUBLIC_IP_PROVIDERS] == [
+        "icanhazip",
+        "aws-checkip",
+        "ipify",
+    ]
 
 
 def test_egress_guard_rejects_geo_response_for_different_ip() -> None:
