@@ -403,10 +403,12 @@ def _normalize_payload_ip(ip: object, queried_ip: str) -> str:
     return normalized
 
 
+# Ordered by observed latency and reliability: the first provider to answer wins,
+# so a slow or flaky one at the front costs every request that misses the cache.
 _PUBLIC_IP_PROVIDERS = (
-    PublicIpProvider("ipify", "https://api.ipify.org"),
-    PublicIpProvider("aws-checkip", "https://checkip.amazonaws.com"),
     PublicIpProvider("icanhazip", "https://icanhazip.com"),
+    PublicIpProvider("aws-checkip", "https://checkip.amazonaws.com"),
+    PublicIpProvider("ipify", "https://api.ipify.org"),
 )
 
 _GEO_PROVIDERS = (
